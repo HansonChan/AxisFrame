@@ -33,6 +33,7 @@ artifacts/
 design-qa.md
 *.md
 !README.md
+!README_EN.md
 
 # CAD source and catalog metadata are not required by the web runtime
 public/assets/components/**/source/
