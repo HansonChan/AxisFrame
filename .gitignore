@@ -1,0 +1,41 @@
+# Dependencies, build output, and local caches
+node_modules/
+dist/
+.npm-cache/
+tmp/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+*.log
+
+# Local environment and editor state
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
+
+# Codex and agent working files
+.codex/
+.agents/
+.openai/
+AGENTS.md
+memory.md
+lessons.md
+
+# Internal documentation, research, tests, tools, and generated artifacts
+docs/
+research/
+tests/
+tools/
+artifacts/
+design-qa.md
+*.md
+!README.md
+
+# CAD source and catalog metadata are not required by the web runtime
+public/assets/components/**/source/
+public/assets/components/**/metadata.json
+public/assets/components/shaft-supports/SK10/
+public/assets/template-previews/blank.png
