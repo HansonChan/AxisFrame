@@ -1868,25 +1868,60 @@ function CornerHolePanelGeometry({
   return <primitive object={geometry} attach="geometry" />;
 }
 
-function ComponentPortMarkers({ ports, showLabels = false, markerScale = 1 }: { ports: ComponentPort[]; showLabels?: boolean; markerScale?: number }) {
+function ComponentPortMarkers({
+  ports,
+  showLabels = false,
+  unitsPerMm = mmToScene(1),
+}: {
+  ports: ComponentPort[];
+  showLabels?: boolean;
+  unitsPerMm?: number;
+}) {
   const shaftPorts = ports.filter(isShaftAssemblyPort);
   return (
     <>
       {shaftPorts.map((port) => {
         const direction: Vec3Tuple = port.axis === "x" ? [1, 0, 0] : port.axis === "y" ? [0, 1, 0] : [0, 0, 1];
-        const lineStart = port.position.map((value, index) => value - direction[index] * 0.34 * markerScale) as Vec3Tuple;
-        const lineEnd = port.position.map((value, index) => value + direction[index] * 0.34 * markerScale) as Vec3Tuple;
+        const holeRadius = Math.max(port.diameter * unitsPerMm / 2, unitsPerMm * 0.5);
+        const ringStrokeRadius = Math.max(holeRadius * 0.06, unitsPerMm * 0.12);
+        const ringOutlineRadius = ringStrokeRadius * 1.45;
+        const ringRadius = Math.max(holeRadius - ringStrokeRadius, ringStrokeRadius);
+        const ringOutlineCenterRadius = Math.max(holeRadius - ringOutlineRadius, ringOutlineRadius);
+        const axisHalfLength = holeRadius * 1.35;
+        const lineStart = direction.map((value) => -value * axisHalfLength) as Vec3Tuple;
+        const lineEnd = direction.map((value) => value * axisHalfLength) as Vec3Tuple;
         const torusRotation: Vec3Tuple = port.axis === "x" ? [0, Math.PI / 2, 0] : port.axis === "y" ? [Math.PI / 2, 0, 0] : [0, 0, 0];
-        const labelOffset: Vec3Tuple = (port.axis === "x" ? [0.42, 0.25, 0] : port.axis === "y" ? [0, 0.46, 0] : [-0.42, 0.25, 0]).map((value) => value * markerScale) as Vec3Tuple;
-        const labelPosition = port.position.map((value, index) => value + labelOffset[index]) as Vec3Tuple;
+        const labelDistance = holeRadius * 2.4;
+        const labelOffset: Vec3Tuple = port.axis === "x"
+          ? [labelDistance, labelDistance * 0.6, 0]
+          : port.axis === "y"
+            ? [0, labelDistance, 0]
+            : [-labelDistance, labelDistance * 0.6, 0];
         return (
-          <group key={port.id}>
-            <Line points={[lineStart, lineEnd]} color="#39e66d" lineWidth={2.2} />
-            <mesh position={port.position} rotation={torusRotation}>
-              <torusGeometry args={[0.22 * markerScale, 0.038 * markerScale, 12, 32]} />
-              <meshBasicMaterial color="#39e66d" transparent opacity={0.82} depthTest />
+          <group key={port.id} position={port.position}>
+            <mesh rotation={torusRotation} renderOrder={30}>
+              <torusGeometry args={[ringOutlineCenterRadius, ringOutlineRadius, 10, 36]} />
+              <meshBasicMaterial color="#141413" transparent opacity={0.72} depthTest={false} depthWrite={false} />
             </mesh>
-            {showLabels && <Html position={labelPosition} center><span className="shaft-port-label" data-port-id={port.id} data-display-position={port.position.join(",")}>{port.id} · Ø{port.diameter}</span></Html>}
+            <mesh rotation={torusRotation} renderOrder={31}>
+              <torusGeometry args={[ringRadius, ringStrokeRadius, 10, 36]} />
+              <meshBasicMaterial color="#4dd7e8" transparent opacity={0.98} depthTest={false} depthWrite={false} />
+            </mesh>
+            <Line
+              points={[lineStart, lineEnd]}
+              color="#141413"
+              lineWidth={2}
+              depthTest={false}
+              renderOrder={32}
+            />
+            <Line
+              points={[lineStart, lineEnd]}
+              color="#f4a62a"
+              lineWidth={1}
+              depthTest={false}
+              renderOrder={33}
+            />
+            {showLabels && <Html position={labelOffset} center><span className="shaft-port-label" data-port-id={port.id} data-display-position={port.position.join(",")}>{port.id} · Ø{port.diameter}</span></Html>}
           </group>
         );
       })}
@@ -1935,6 +1970,12 @@ function componentTargetSize(part: LibraryPart, displayMode: ComponentDisplayMod
   return displayMode === "scene"
     ? componentSceneSize(part.dimensions)
     : normalizedComponentSelectionSize(part.dimensions, previewMaxSize, 0);
+}
+
+function componentDisplayUnitsPerMm(part: LibraryPart, displayMode: ComponentDisplayMode) {
+  const target = componentTargetSize(part, displayMode);
+  const dimensionsMm = [part.dimensions.width, part.dimensions.height, part.dimensions.length];
+  return Math.min(...target.map((value, index) => value / Math.max(dimensionsMm[index], 0.001)));
 }
 
 function proceduralComponentFit(part: LibraryPart, displayMode: ComponentDisplayMode) {
@@ -2476,7 +2517,7 @@ function ComponentModelPreview({ part, detailed = false, onExportObjectReady }: 
           <Suspense fallback={null}>
             {part.modelAssetUrl ? <ImportedComponentModel part={part} displayMode="preview" onObjectReady={onExportObjectReady} /> : <ComponentModel part={part} displayMode="preview" onObjectReady={onExportObjectReady} />}
           </Suspense>
-          {detailed && <ComponentPortMarkers ports={previewPorts} showLabels />}
+          {detailed && <ComponentPortMarkers ports={previewPorts} showLabels unitsPerMm={componentDisplayUnitsPerMm(part, "preview")} />}
           {detailed && <axesHelper args={[2.1]} />}
         </group>
         <PreviewInvalidator revision={previewRevision} />
@@ -4277,7 +4318,7 @@ function OrientationAxis({
 
 function ViewOrientationGizmo() {
   return (
-    <GizmoHelper alignment="bottom-left" margin={[64, 100]} renderPriority={3}>
+    <GizmoHelper alignment="bottom-left" margin={[64, 100]} renderPriority={1}>
       <group scale={28}>
         <mesh renderOrder={999}>
           <sphereGeometry args={[0.34, 28, 20]} />
@@ -4611,6 +4652,12 @@ function EditablePartGroup({
       </group>
       {active && !locked && controlObject && (
         <TransformControls
+          ref={(controls) => {
+            const helper = (controls as unknown as { getHelper?: () => THREE.Object3D } | null)?.getHelper?.();
+            helper?.traverse((object) => {
+              object.renderOrder = 20;
+            });
+          }}
           object={controlObject}
           mode={transformMode}
           size={0.72}
@@ -5666,6 +5713,7 @@ function ThreeRackScene({
   background,
   transformMode,
   modifierDuplicate,
+  explodedViewActive,
   explosionFactor,
   dimensions,
   overallBounds,
@@ -5703,6 +5751,7 @@ function ThreeRackScene({
   background: CanvasBg;
   transformMode: TransformMode;
   modifierDuplicate: boolean;
+  explodedViewActive: boolean;
   explosionFactor: number;
   dimensions: FrameDimensions;
   overallBounds: OverallDesignBounds | null;
@@ -5966,7 +6015,7 @@ function ThreeRackScene({
     ? resolveReferenceGuides(referenceDrag.id, referenceDrag.position)
     : null, [referenceDrag, resolveReferenceGuides]);
   const renderTransform = (id: string) => getPartTransform(displayTransforms, id);
-  const exploded = explosionFactor > 0;
+  const exploded = explodedViewActive;
   const groupTransforming = activeVisibleGroupIds.length >= 2;
   const groupLocked = activeVisibleGroupIds.some((id) => lockedIds.has(id));
   const selectedLibraryPart = addedParts.find((part) => part.id === selectedId)?.libraryPart;
@@ -6188,7 +6237,7 @@ function ThreeRackScene({
                     />
                   ) : renderedPart.modelAssetUrl ? <ImportedComponentModel part={renderedPart} displayMode="scene" /> : <ComponentModel part={renderedPart} displayMode="scene" />}
                 </Suspense>
-                {selectedIds.includes(part.id) && part.kind === "joint" && <ComponentPortMarkers ports={renderedPorts} markerScale={0.35} />}
+                {selectedIds.includes(part.id) && part.kind === "joint" && <ComponentPortMarkers ports={renderedPorts} unitsPerMm={componentDisplayUnitsPerMm(renderedPart, "scene")} />}
                 {selectedIds.includes(part.id) && <mesh><boxGeometry args={componentSceneSize(renderedPart.dimensions, 0.02)} /><meshBasicMaterial color="#f2b21b" wireframe transparent opacity={0.58} /></mesh>}
                 {part.kind === "rod" && !exploded && !groupTransforming && selectedIds.includes(part.id) && selectedId === part.id && !lockedIds.has(part.id) && (
                   <ShaftLengthHandles
@@ -6427,6 +6476,7 @@ function CanvasPanel({
   const [expandedToolbar, setExpandedToolbar] = useState<"view" | "render" | "background" | "selection" | "transform" | null>(null);
   const [transformMode, setTransformMode] = useState<TransformMode>("translate");
   const [modifierDuplicate, setModifierDuplicate] = useState(false);
+  const [explodedViewActive, setExplodedViewActive] = useState(false);
   const [explosionPercent, setExplosionPercent] = useState(0);
   const [selectionMode, setSelectionMode] = useState<SelectionMode>("click");
   const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
@@ -6458,6 +6508,14 @@ function CanvasPanel({
           backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1)), url("${imageBackgroundUrl}")`,
         }
       : undefined;
+  const enterExplodedView = () => {
+    setExplodedViewActive(true);
+    setExplosionPercent(65);
+  };
+  const restoreAssemblyView = () => {
+    setExplosionPercent(0);
+    setExplodedViewActive(false);
+  };
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -6590,13 +6648,13 @@ function CanvasPanel({
         <div className="canvas-toolbar exploded-view-toolbar">
           <button
             type="button"
-            className={explosionPercent > 0 ? "active" : ""}
-            aria-pressed={explosionPercent > 0}
-            aria-label={lang === "zh" ? (explosionPercent > 0 ? "复原装配视图" : "自动生成爆炸图") : (explosionPercent > 0 ? "RESTORE ASSEMBLY VIEW" : "GENERATE EXPLODED VIEW")}
-            onClick={() => setExplosionPercent((current) => current > 0 ? 0 : 65)}
+            className={explodedViewActive ? "active" : ""}
+            aria-pressed={explodedViewActive}
+            aria-label={lang === "zh" ? (explodedViewActive ? "复原装配视图" : "自动生成爆炸图") : (explodedViewActive ? "RESTORE ASSEMBLY VIEW" : "GENERATE EXPLODED VIEW")}
+            onClick={explodedViewActive ? restoreAssemblyView : enterExplodedView}
           >
-            {explosionPercent > 0 ? <Group size={14} /> : <Ungroup size={14} />}
-            {lang === "zh" ? (explosionPercent > 0 ? "复原" : "爆炸图") : (explosionPercent > 0 ? "RESTORE" : "EXPLODE")}
+            {explodedViewActive ? <Group size={14} /> : <Ungroup size={14} />}
+            {lang === "zh" ? (explodedViewActive ? "复原" : "爆炸图") : (explodedViewActive ? "RESTORE" : "EXPLODE")}
           </button>
         </div>
         <div className={`canvas-toolbar hover-select-toolbar view-toolbar ${expandedToolbar === "view" ? "expanded" : ""}`} onPointerEnter={() => setExpandedToolbar("view")} onPointerLeave={() => setExpandedToolbar((current) => current === "view" ? null : current)}>
@@ -6723,7 +6781,7 @@ function CanvasPanel({
         )}
       </aside>
       <button
-        className={`canvas-add-component-fab ${explosionPercent > 0 ? "raised" : ""}`}
+        className={`canvas-add-component-fab ${explodedViewActive ? "raised" : ""}`}
         data-testid="canvas-add-component"
         type="button"
         title={lang === "zh" ? "添加组件" : "ADD COMPONENT"}
@@ -6732,7 +6790,7 @@ function CanvasPanel({
       >
         <Plus size={24} strokeWidth={2.2} />
       </button>
-      {selectedIds.length === 2 && activeGroupPartIds.length === 0 && explosionPercent === 0 && (
+      {selectedIds.length === 2 && activeGroupPartIds.length === 0 && !explodedViewActive && (
         <div className="pair-constraint-toolbar" role="group" aria-label={lang === "zh" ? "双组件对齐与连接" : "PAIR ALIGNMENT AND CONNECTION"}>
           <div className="pair-constraint-summary">
             <Target size={14} />
@@ -6770,6 +6828,7 @@ function CanvasPanel({
         background={background}
         transformMode={transformMode}
         modifierDuplicate={modifierDuplicate}
+        explodedViewActive={explodedViewActive}
         explosionFactor={explosionPercent / 100}
         dimensions={dimensions}
         overallBounds={overallBounds}
@@ -6807,11 +6866,11 @@ function CanvasPanel({
         <span>{lang === "zh" ? "视图方向" : "VIEW AXES"}</span>
         <div aria-hidden="true"><i className="axis-x">X</i><i className="axis-y">Y</i><i className="axis-z">Z</i></div>
       </div>
-      {explosionPercent > 0 && (
+      {explodedViewActive && (
         <div className="exploded-view-controls" role="group" aria-label={lang === "zh" ? "爆炸图间距" : "EXPLODED VIEW SPACING"}>
           <div><Ungroup size={15} /><span>{lang === "zh" ? "爆炸距离" : "EXPLOSION"}</span><strong>{explosionPercent}%</strong></div>
           <input aria-label={lang === "zh" ? "爆炸距离" : "EXPLOSION DISTANCE"} type="range" min="0" max="100" step="5" value={explosionPercent} onChange={(event) => setExplosionPercent(Number(event.target.value))} />
-          <button type="button" onClick={() => setExplosionPercent(0)}><Group size={14} />{lang === "zh" ? "复原装配" : "RESTORE"}</button>
+          <button type="button" onClick={restoreAssemblyView}><Group size={14} />{lang === "zh" ? "复原装配" : "RESTORE"}</button>
           <p>{lang === "zh" ? "展示模式不会修改零件坐标；已锁定编辑操作。" : "PRESENTATION ONLY. PART COORDINATES ARE UNCHANGED AND EDITING IS LOCKED."}</p>
         </div>
       )}

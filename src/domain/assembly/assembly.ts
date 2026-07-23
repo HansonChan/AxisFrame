@@ -129,9 +129,11 @@ function rotateVector(vector: Vec3, rotation: Vec3): Vec3 {
   const [sinX, cosX] = [Math.sin(rx), Math.cos(rx)];
   const [sinY, cosY] = [Math.sin(ry), Math.cos(ry)];
   const [sinZ, cosZ] = [Math.sin(rz), Math.cos(rz)];
-  const afterX: Vec3 = [vector[0], vector[1] * cosX - vector[2] * sinX, vector[1] * sinX + vector[2] * cosX];
-  const afterY: Vec3 = [afterX[0] * cosY + afterX[2] * sinY, afterX[1], -afterX[0] * sinY + afterX[2] * cosY];
-  return [afterY[0] * cosZ - afterY[1] * sinZ, afterY[0] * sinZ + afterY[1] * cosZ, afterY[2]];
+  // Three.js renders parts with an XYZ Euler. For column vectors that means
+  // applying the component rotations in Z → Y → X order.
+  const afterZ: Vec3 = [vector[0] * cosZ - vector[1] * sinZ, vector[0] * sinZ + vector[1] * cosZ, vector[2]];
+  const afterY: Vec3 = [afterZ[0] * cosY + afterZ[2] * sinY, afterZ[1], -afterZ[0] * sinY + afterZ[2] * cosY];
+  return [afterY[0], afterY[1] * cosX - afterY[2] * sinX, afterY[1] * sinX + afterY[2] * cosX];
 }
 
 function closestPointOnSegment(point: Vec3, segment: ShaftSegment) {
