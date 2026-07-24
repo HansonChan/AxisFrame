@@ -85,6 +85,7 @@ import { resizePanelFromEdge, type PanelResizeAxis } from "../domain/geometry/pa
 import { flipPartTransform, type FlipDirection } from "../domain/geometry/partFlip";
 import { rotatePartTransform90, type QuickRotateAxis, type QuickRotateDirection } from "../domain/geometry/quickRotate";
 import { mirrorDuplicatePlacement } from "../domain/geometry/mirrorDuplicate";
+import { createPairDistanceGuides, type PairDistanceAxis } from "../domain/geometry/pairDistance";
 import { generateExplodedView } from "../domain/geometry/explodedView";
 import { roundFreePositionMm, sceneDeltaToFreePositionMm } from "../domain/geometry/freeMovement";
 import {
@@ -5754,6 +5755,81 @@ function SmartReferenceGuides({ moving, alignment }: { moving: Vec3Tuple; alignm
   );
 }
 
+function PairDistanceGuides({
+  firstId,
+  secondId,
+  first,
+  second,
+}: {
+  firstId: string;
+  secondId: string;
+  first: Vec3Tuple;
+  second: Vec3Tuple;
+}) {
+  const guides = useMemo(() => createPairDistanceGuides(first, second), [
+    first[0],
+    first[1],
+    first[2],
+    second[0],
+    second[1],
+    second[2],
+  ]);
+  const colors: Record<PairDistanceAxis, string> = {
+    x: "#d86b6b",
+    y: "#79b96b",
+    z: "#6293c7",
+  };
+  const tickVectors: Record<PairDistanceAxis, Vec3Tuple> = {
+    x: [0, 0.05, 0],
+    y: [0.05, 0, 0],
+    z: [0, 0.05, 0],
+  };
+  const labelOffsets: Record<PairDistanceAxis, Vec3Tuple> = {
+    x: [0, 0.14, 0],
+    y: [0.14, 0, 0],
+    z: [0, 0, 0.14],
+  };
+  const tickPoints = (point: Vec3Tuple, tick: Vec3Tuple): [Vec3Tuple, Vec3Tuple] => [
+    point.map((value, index) => value - tick[index]) as Vec3Tuple,
+    point.map((value, index) => value + tick[index]) as Vec3Tuple,
+  ];
+
+  return (
+    <group name="pair-distance-guides">
+      {guides.map((guide) => {
+        const tick = tickVectors[guide.axis];
+        const labelPosition = addVec3(guide.midpoint, labelOffsets[guide.axis]);
+        return (
+          <group key={guide.axis}>
+            <Line
+              points={[guide.start, guide.end]}
+              color={colors[guide.axis]}
+              lineWidth={0.75}
+              transparent
+              opacity={0.82}
+              depthTest={false}
+              renderOrder={25}
+            />
+            <Line points={tickPoints(guide.start, tick)} color={colors[guide.axis]} lineWidth={0.75} depthTest={false} renderOrder={25} />
+            <Line points={tickPoints(guide.end, tick)} color={colors[guide.axis]} lineWidth={0.75} depthTest={false} renderOrder={25} />
+            <Html position={labelPosition} center pointerEvents="none" style={{ pointerEvents: "none" }}>
+              <span
+                className={`pair-distance-label axis-${guide.axis}`}
+                data-pair-distance-axis={guide.axis.toUpperCase()}
+                data-distance-mm={guide.distanceMm}
+                aria-label={`${guide.axis.toUpperCase()} distance between ${firstId} and ${secondId}: ${guide.distanceMm} millimeters`}
+              >
+                <b>{guide.axis.toUpperCase()}</b>
+                {guide.distanceMm.toFixed(1)} <small>MM</small>
+              </span>
+            </Html>
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
 function GroupTransformController({
   memberIds,
   pivot,
@@ -6189,6 +6265,15 @@ function ThreeRackScene({
 
       {referenceDrag && activeReferenceAlignment && activeReferenceAlignment.guides.length > 0 && (
         <SmartReferenceGuides moving={referenceDrag.position} alignment={activeReferenceAlignment} />
+      )}
+
+      {!exploded && selectedIds.length === 2 && partCenters[selectedIds[0]] && partCenters[selectedIds[1]] && (
+        <PairDistanceGuides
+          firstId={selectedIds[0]}
+          secondId={selectedIds[1]}
+          first={partCenters[selectedIds[0]]}
+          second={partCenters[selectedIds[1]]}
+        />
       )}
 
       <ReferenceGuideContext.Provider value={referenceGuideContext}>

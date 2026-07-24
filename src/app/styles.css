@@ -4619,6 +4619,48 @@ button.dimension-label:focus-visible {
   box-shadow: 0 4px 14px rgb(0 0 0 / 28%);
 }
 
+.pair-distance-label {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid color-mix(in srgb, currentcolor 46%, transparent);
+  border-radius: 2px;
+  padding: 0 5px;
+  background: rgb(5 5 5 / 82%);
+  color: #c8c8c8;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 3px 10px rgb(0 0 0 / 22%);
+}
+
+.pair-distance-label b {
+  color: currentcolor;
+  font-size: 8px;
+}
+
+.pair-distance-label small {
+  color: #8f8f8f;
+  font-size: 6px;
+  font-weight: 900;
+}
+
+.pair-distance-label.axis-x {
+  color: #d86b6b;
+}
+
+.pair-distance-label.axis-y {
+  color: #79b96b;
+}
+
+.pair-distance-label.axis-z {
+  color: #6293c7;
+}
+
 .pair-constraint-toolbar {
   position: absolute;
   z-index: 11;
