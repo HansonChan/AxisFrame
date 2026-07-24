@@ -130,21 +130,6 @@ import {
 } from "../domain/components/panelCutouts";
 import { addCircularCutoutPrimitive, circularHoleClearances, clampCircularHolePoint, describeCircularCutouts, moveCircularCutoutPrimitive, normalizeCircularCutoutPrimitives, projectThreeViewOutlines, removePrimitiveAtIndex, updateCircularCutoutDiameter, type ThreeViewHoleDraft, type ThreeViewPlane } from "../domain/components/threeViewGeometry";
 import { calculatePegboardHoles, defaultPegboardParameters, resolvePegboardParameters, type PegboardParameters } from "../domain/components/pegboard";
-import {
-  createPhotoCoffeeRackProject,
-  PHOTO_RACK_PROJECT_ID,
-  PHOTO_RACK_PROJECT_SEED_KEY,
-} from "../domain/projects/referenceRackProject";
-import {
-  createStablePegboardStandProject,
-  PEGBOARD_STAND_PROJECT_ID,
-  PEGBOARD_STAND_PROJECT_SEED_KEY,
-} from "../domain/projects/pegboardStandProject";
-import {
-  createGravityValidatedFurnitureProjects,
-  FURNITURE_PROJECTS_SEED_KEY,
-} from "../domain/projects/furnitureProjects";
-import { createOptimizedRackTemplateState } from "../domain/projects/rackTemplateAssembly";
 import { shaftDiameterOptions } from "../domain/components/componentFamilies";
 import {
   AlertTriangle,
@@ -775,27 +760,6 @@ const allPartIds = [
   ...joints.map(({ id }) => id),
 ];
 
-function optimizedRackSnapshot(dimensions: FrameDimensions, deletedPartIds: string[]): EditorSnapshot {
-  const optimized = createOptimizedRackTemplateState(dimensions, deletedPartIds);
-  const deleted = new Set(deletedPartIds);
-  return {
-    schemaVersion: PROJECT_SCHEMA_VERSION,
-    dimensions,
-    background: "room",
-    transforms: optimized.transforms,
-    materials: Object.fromEntries(allPartIds.filter((id) => !deleted.has(id)).map((id) => [id, id.startsWith("P-") ? "acrylic" : "stainless"])),
-    panelCutouts: optimized.panelCutouts,
-    resolvedRiskIds: joints.filter(({ id, warning }) => warning && !deleted.has(id)).map(({ id }) => id),
-    deletedIds: deletedPartIds,
-    addedParts: [],
-    userGroups: [],
-    hiddenIds: [],
-    lockedIds: [],
-    isolatedIds: [],
-    assemblyConnections: optimized.assemblyConnections,
-  };
-}
-
 const rackTemplates: RackTemplateDefinition[] = [
   {
     id: "blank",
@@ -805,41 +769,20 @@ const rackTemplates: RackTemplateDefinition[] = [
     deletedPartIds: [...allPartIds],
     previewImage: "/assets/template-previews/blank-empty-state.png",
   },
-  {
-    id: "three-tier",
-    name: { zh: "三层开放式置物架", en: "THREE-TIER OPEN RACK" },
-    description: { zh: "三层板四角穿轴；共享立柱、横杆承托与节点接触共同形成落地受力路径。", en: "Three corner-drilled shelves share four uprights with rail and node-surface support to ground." },
-    dimensions: { width: 900, height: 900, depth: 350 },
-    deletedPartIds: [],
-    previewImage: "/assets/template-previews/three-tier.png",
-    snapshot: optimizedRackSnapshot({ width: 900, height: 900, depth: 350 }, []),
-  },
-  {
-    id: "two-tier",
-    name: { zh: "双层开放式置物架", en: "TWO-TIER OPEN RACK" },
-    description: { zh: "上下层板共用四根穿孔立柱，中部留空；每层保持横杆与节点双重支撑。", en: "Top and bottom shelves share four through-hole uprights with dual rail and node support." },
-    dimensions: { width: 900, height: 720, depth: 350 },
-    deletedPartIds: ["R-005", "R-006", "R-007", "R-008", "P-002", "J-005", "J-006", "J-007", "J-008"],
-    previewImage: "/assets/template-previews/two-tier.png",
-    snapshot: optimizedRackSnapshot(
-      { width: 900, height: 720, depth: 350 },
-      ["R-005", "R-006", "R-007", "R-008", "P-002", "J-005", "J-006", "J-007", "J-008"],
-    ),
-  },
-  {
-    id: "shaft-frame",
-    name: { zh: "基础光轴框架", en: "BASIC SHAFT FRAME" },
-    description: { zh: "共享立柱与三向节点组成完整落地骨架，预留后续层板打孔和表面支撑。", en: "Shared uprights and three-axis nodes form a grounded frame ready for drilled shelves." },
-    dimensions: { width: 900, height: 900, depth: 350 },
-    deletedPartIds: ["P-001", "P-002", "P-003"],
-    previewImage: "/assets/template-previews/shaft-frame.png",
-    snapshot: optimizedRackSnapshot({ width: 900, height: 900, depth: 350 }, ["P-001", "P-002", "P-003"]),
-  },
 ];
 
 const PROJECTS_STORAGE_KEY = "axisframe-projects-v1";
 const CURRENT_PROJECT_STORAGE_KEY = "axisframe-current-project-id";
 const TEMPLATES_STORAGE_KEY = "axisframe-templates-v1";
+const HISTORICAL_TEMPLATES_CLEARED_KEY = "axisframe-historical-templates-cleared-v1";
+const HISTORICAL_SEEDED_PROJECT_IDS = new Set([
+  "project-photo-coffee-rack-v1",
+  "project-stable-pegboard-stand-v2",
+  "project-dahon-folding-bike-rack-v1",
+  "project-coffee-machine-storage-rack-v1",
+  "project-floor-coat-rack-v1",
+  "project-floating-monitor-riser-v1",
+]);
 
 function readSavedProjects(): SavedProject[] {
   try {
@@ -849,28 +792,11 @@ function readSavedProjects(): SavedProject[] {
       ? parsed.filter((project) => (project?.version === 1 || project?.version === PROJECT_SCHEMA_VERSION) && project.snapshot)
         .map((project) => ({ ...project, snapshot: migrateRetiredCrossClampSnapshot(project.snapshot) }))
       : [];
-    if (!window.localStorage.getItem(PHOTO_RACK_PROJECT_SEED_KEY)) {
-      const referenceProject = createSeededPhotoRackProject();
-      if (referenceProject) {
-        projects = [referenceProject, ...projects.filter(({ id }) => id !== PHOTO_RACK_PROJECT_ID)];
-        window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
-      }
-      window.localStorage.setItem(PHOTO_RACK_PROJECT_SEED_KEY, "1");
-    }
-    if (!window.localStorage.getItem(PEGBOARD_STAND_PROJECT_SEED_KEY)) {
-      const pegboardProject = createSeededPegboardStandProject();
-      if (pegboardProject) {
-        projects = [pegboardProject, ...projects.filter(({ id }) => id !== PEGBOARD_STAND_PROJECT_ID)];
-        window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
-      }
-      window.localStorage.setItem(PEGBOARD_STAND_PROJECT_SEED_KEY, "1");
-    }
-    if (!window.localStorage.getItem(FURNITURE_PROJECTS_SEED_KEY)) {
-      const furnitureProjects = createSeededFurnitureProjects();
-      const furnitureProjectIds = new Set(furnitureProjects.map(({ id }) => id));
-      projects = [...furnitureProjects, ...projects.filter(({ id }) => !furnitureProjectIds.has(id))];
-      window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
-      window.localStorage.setItem(FURNITURE_PROJECTS_SEED_KEY, "1");
+    projects = projects.filter(({ id }) => !HISTORICAL_SEEDED_PROJECT_IDS.has(id));
+    const currentProjectId = window.localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY);
+    if (currentProjectId && HISTORICAL_SEEDED_PROJECT_IDS.has(currentProjectId)) {
+      window.localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
+      window.localStorage.removeItem("axisframe-project-v1");
     }
     window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
     return projects;
@@ -881,6 +807,11 @@ function readSavedProjects(): SavedProject[] {
 
 function readSavedTemplates(): SavedTemplate[] {
   try {
+    if (!window.localStorage.getItem(HISTORICAL_TEMPLATES_CLEARED_KEY)) {
+      window.localStorage.removeItem(TEMPLATES_STORAGE_KEY);
+      window.localStorage.setItem(HISTORICAL_TEMPLATES_CLEARED_KEY, "1");
+      return [];
+    }
     const value = window.localStorage.getItem(TEMPLATES_STORAGE_KEY);
     if (!value) return [];
     const parsed = JSON.parse(value) as SavedTemplate[];
@@ -1827,39 +1758,6 @@ function migrateRetiredCrossClampSnapshot(snapshot: EditorSnapshot): EditorSnaps
       !replacedIds.has(connectorId) || portId.startsWith("TEMPLATE-"),
     ),
   };
-}
-
-function createSeededPhotoRackProject(): SavedProject | null {
-  const shaft = initialLibraryParts.find(({ id }) => id === "lib-shaft-10");
-  const panel = initialLibraryParts.find(({ id }) => id === "lib-panel");
-  const openRingClamp = initialLibraryParts.find(({ id }) => id === "lib-fixed-ring-10");
-  const crossConnector = initialLibraryParts.find(({ id }) => id === "lib-equal-cross-10");
-  if (!shaft || !panel || !openRingClamp || !crossConnector) return null;
-  return createPhotoCoffeeRackProject({ shaft, panel, openRingClamp, crossConnector }) as SavedProject;
-}
-
-function createSeededPegboardStandProject(): SavedProject | null {
-  const shaft = initialLibraryParts.find(({ id }) => id === "lib-shaft-10");
-  const pegboard = initialLibraryParts.find(({ id }) => id === "lib-pegboard-600");
-  const crossConnector = initialLibraryParts.find(({ id }) => id === "lib-equal-cross-10");
-  const panelClamp = initialLibraryParts.find(({ id }) => id === "lib-single-bore-fixed-clamp-10");
-  if (!shaft || !pegboard || !crossConnector || !panelClamp) return null;
-  return createStablePegboardStandProject({ shaft, pegboard, crossConnector, panelClamp }) as SavedProject;
-}
-
-function createSeededFurnitureProjects(): SavedProject[] {
-  const shaft = initialLibraryParts.find(({ id }) => id === "lib-shaft-10");
-  const panel = initialLibraryParts.find(({ id }) => id === "lib-panel");
-  const crossConnector = initialLibraryParts.find(({ id }) => id === "lib-equal-cross-10");
-  const panelSupport = initialLibraryParts.find(({ id }) => id === "lib-sk10");
-  if (!shaft || !panel || !crossConnector || !panelSupport) return [];
-  const proceduralPanelSupport = { ...panelSupport, modelAssetUrl: undefined, modelAssetName: undefined };
-  return createGravityValidatedFurnitureProjects({
-    shaft,
-    panel,
-    crossConnector,
-    panelSupport: proceduralPanelSupport,
-  }) as SavedProject[];
 }
 
 function AnnularGeometry({ innerDiameter, outerDiameter, thickness }: { innerDiameter: number; outerDiameter: number; thickness: number }) {
@@ -2812,17 +2710,7 @@ function PartPickerDialog({ parts, lang, onClose, onAdd }: { parts: LibraryPart[
 }
 
 function templatePreviewImage(template: RackTemplateDefinition) {
-  if (template.previewImage) return template.previewImage;
-  if (!template.snapshot) return "/assets/template-previews/blank-empty-state.png";
-  const visiblePanelCount = [
-    ...panels.map(({ id }) => id),
-    ...template.snapshot.addedParts.filter(({ kind }) => kind === "panel").map(({ id }) => id),
-  ].filter((id) => !template.snapshot!.deletedIds.includes(id)).length;
-  if (visiblePanelCount >= 3) return "/assets/template-previews/three-tier.png";
-  if (visiblePanelCount >= 2) return "/assets/template-previews/two-tier.png";
-  return visiblePanelCount === 0
-    ? "/assets/template-previews/shaft-frame.png"
-    : "/assets/template-previews/three-tier.png";
+  return template.previewImage ?? "/assets/template-previews/blank-empty-state.png";
 }
 
 function TemplatePickerDialog({
@@ -2847,7 +2735,7 @@ function TemplatePickerDialog({
           <div>
             <span>{isZh ? "项目模板" : "PROJECT TEMPLATES"}</span>
             <h2 id="template-picker-title">{isZh ? "从模板创建" : "CREATE FROM TEMPLATE"}</h2>
-            <p>{isZh ? "选择一个基础结构，创建后仍可自由调整尺寸、组件和材质。" : "Choose a starting structure, then freely edit its dimensions, components, and materials."}</p>
+            <p>{isZh ? "从空白项目开始；之后保存的新模板会显示在这里。" : "Start from a blank project. New templates you save later will appear here."}</p>
           </div>
           <button type="button" aria-label={isZh ? "关闭模板列表" : "CLOSE TEMPLATE LIST"} onClick={onClose}>×</button>
         </header>
