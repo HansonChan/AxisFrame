@@ -4625,8 +4625,11 @@ button.dimension-label:focus-visible {
   top: 70px;
   left: 50%;
   display: flex;
+  max-width: calc(100% - 32px);
   min-height: 38px;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 5px;
   border: 1px solid var(--line-strong);
   border-radius: 4px;
@@ -4652,11 +4655,65 @@ button.dimension-label:focus-visible {
   color: #ffffff;
 }
 
+.pair-constraint-summary em {
+  border: 1px solid rgb(126 217 87 / 35%);
+  border-radius: 999px;
+  padding: 2px 5px;
+  color: var(--success);
+  font-style: normal;
+}
+
 .pair-align-actions {
   display: inline-flex;
   gap: 3px;
   border-left: 1px solid var(--line);
   padding-left: 5px;
+}
+
+.pair-precise-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-left: 1px solid var(--line);
+  padding-left: 5px;
+}
+
+.pair-gap-field {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  padding: 0 6px;
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.pair-gap-field:focus-within {
+  outline: 2px solid var(--success);
+  outline-offset: 1px;
+}
+
+.pair-gap-field input {
+  width: 48px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  color: #ffffff;
+  font: inherit;
+  text-align: right;
+  outline: 0;
+}
+
+.pair-gap-field b {
+  color: var(--muted);
+  font-size: 7px;
+  text-transform: uppercase;
 }
 
 .pair-constraint-toolbar button {
@@ -4665,6 +4722,135 @@ button.dimension-label:focus-visible {
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.04em;
+}
+
+.pair-swap-button {
+  color: var(--muted);
+}
+
+.assembly-relation-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.assembly-relation-list {
+  display: grid;
+  gap: 6px;
+}
+
+.assembly-relation-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--success);
+  border-radius: 3px;
+  padding: 8px;
+  background: var(--panel-3);
+}
+
+.assembly-relation-list article[data-relation-status="warning"] {
+  border-left-color: var(--warning);
+}
+
+.assembly-relation-list article[data-relation-status="invalid"] {
+  border-left-color: var(--danger);
+}
+
+.assembly-relation-list article > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.assembly-relation-list strong,
+.assembly-relation-list span,
+.assembly-relation-list small,
+.assembly-relation-list em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assembly-relation-list strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.assembly-relation-list span,
+.assembly-relation-list small,
+.assembly-relation-list em {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  font-style: normal;
+}
+
+.assembly-relation-list em {
+  color: var(--warning);
+}
+
+.assembly-relation-list button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.assembly-relation-editor,
+.assembly-relation-gap-editor {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+.assembly-relation-editor select,
+.assembly-relation-editor input,
+.assembly-relation-gap-editor input {
+  min-width: 0;
+  height: 27px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  padding: 0 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  outline: none;
+}
+
+.assembly-relation-editor select {
+  max-width: 130px;
+}
+
+.assembly-relation-editor label,
+.assembly-relation-gap-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.assembly-relation-editor input,
+.assembly-relation-gap-editor input {
+  width: 58px;
+}
+
+.assembly-relation-editor input:focus,
+.assembly-relation-editor select:focus,
+.assembly-relation-gap-editor input:focus {
+  border-color: var(--success);
+  outline: 1px solid var(--success);
+}
+
+.assembly-relation-gap-editor span,
+.assembly-relation-gap-editor b,
+.assembly-relation-editor label span {
+  color: var(--dim);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
 }
 
 .pair-connect-button {
@@ -5598,6 +5784,32 @@ button.dimension-label:focus-visible {
   font-size: 8px;
   font-style: normal;
   pointer-events: none;
+}
+
+.overall-target-comparison {
+  display: grid;
+  gap: 1px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+
+.overall-target-comparison > div {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  background: var(--panel-3);
+}
+
+.overall-target-comparison span {
+  color: var(--dim);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+.overall-target-comparison strong {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
 }
 
 .overall-actual-envelope {

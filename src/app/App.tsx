@@ -6,6 +6,16 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { findBestShaftPanelHoleSnap, findBestSmartSnap, isShaftAssemblyPort, snapAxialStopToPanelSurface, snapConnectorToConnectorSurface, snapConnectorToPanelSurface, type AssemblyConnection, type AssemblyPort, type ConnectorContactTarget, type ConnectorPanelSurfaceContact, type PanelContactTarget, type PanelHoleTarget, type PortBehavior, type PortKind, type SmartSnapResult, type ShaftSegment } from "../domain/assembly/assembly";
 import { alignPairPosition, findReferenceAlignment, retargetMovingPartForFixedAnchor, type AlignmentAxis, type ReferenceAlignment } from "../domain/assembly/pairConstraints";
+import {
+  copyPreciseRelationsForPartMap,
+  createShaftBoreRelation,
+  createSurfaceRelation,
+  preciseRelationFailureMessage,
+  replacePairRelation,
+  solveSurfaceRelation,
+  type BoxAssemblyPart,
+  type PreciseAssemblyRelation,
+} from "../domain/assembly/preciseRelations";
 import { planSmartRackAlignment, type SmartAlignAxis, type SmartAlignPart } from "../domain/assembly/smartRackAlignment";
 import { analyzeStructure, estimatePartMassKg, type PanelMountConnection, type StructuralAnalysis, type StructuralIssue, type StructuralPart } from "../domain/assembly/structuralAnalysis";
 import { componentSceneSize, mmToScene, normalizedComponentSelectionSize } from "../domain/components/componentBounds";
@@ -272,6 +282,7 @@ type EditorSnapshot = {
   lockedIds: string[];
   isolatedIds: string[];
   assemblyConnections?: AssemblyConstraint[];
+  preciseAssemblyRelations?: PreciseAssemblyRelation[];
   panelCutouts?: Record<string, PanelCutout[]>;
 };
 
@@ -987,6 +998,103 @@ function buildPanelContactTargets({
   const added = addedParts
     .filter(({ id, kind }) => kind === "panel" && isVisible(id))
     .map(({ id }) => targetFromTransform(id, getPartTransform(transforms, id)));
+  return [...builtIn, ...added];
+}
+
+function buildPanelHoleTargets({
+  dimensions,
+  addedParts,
+  transforms,
+  panelCutouts,
+  deletedIds = new Set<string>(),
+  hiddenIds = new Set<string>(),
+  isolatedIds = new Set<string>(),
+  onlyPartId,
+}: {
+  dimensions: FrameDimensions;
+  addedParts: AddedPart[];
+  transforms: Record<string, PartTransform>;
+  panelCutouts: Record<string, PanelCutout[]>;
+  deletedIds?: ReadonlySet<string>;
+  hiddenIds?: ReadonlySet<string>;
+  isolatedIds?: ReadonlySet<string>;
+  onlyPartId?: string;
+}): PanelHoleTarget[] {
+  const isVisible = (id: string) =>
+    (!onlyPartId || id === onlyPartId)
+    && !deletedIds.has(id)
+    && !hiddenIds.has(id)
+    && (isolatedIds.size === 0 || isolatedIds.has(id));
+  const targetsForPanel = (partId: string, transform: PartTransform, libraryPart?: LibraryPart) => {
+    const widthMm = transform.sizeX;
+    const lengthMm = transform.sizeZ;
+    const instanceHoles = normalizePanelCutouts(panelCutouts[partId], {
+      widthMm,
+      lengthMm,
+      thicknessMm: transform.sizeY,
+    }).map((hole) => ({
+      id: hole.id,
+      xFromCenterMm: hole.xMm - widthMm / 2,
+      zFromCenterMm: hole.zMm - lengthMm / 2,
+      diameterMm: hole.diameterMm,
+    }));
+    const cornerHoles = libraryPart?.cornerHolePanelParameters
+      ? [
+          [-widthMm / 2 + libraryPart.cornerHolePanelParameters.holeInsetX, -lengthMm / 2 + libraryPart.cornerHolePanelParameters.holeInsetZ],
+          [widthMm / 2 - libraryPart.cornerHolePanelParameters.holeInsetX, -lengthMm / 2 + libraryPart.cornerHolePanelParameters.holeInsetZ],
+          [widthMm / 2 - libraryPart.cornerHolePanelParameters.holeInsetX, lengthMm / 2 - libraryPart.cornerHolePanelParameters.holeInsetZ],
+          [-widthMm / 2 + libraryPart.cornerHolePanelParameters.holeInsetX, lengthMm / 2 - libraryPart.cornerHolePanelParameters.holeInsetZ],
+        ].map(([xFromCenterMm, zFromCenterMm], index) => ({
+          id: `CORNER-${index + 1}`,
+          xFromCenterMm,
+          zFromCenterMm,
+          diameterMm: libraryPart.cornerHolePanelParameters!.holeDiameter,
+        }))
+      : [];
+    const pegboardParameters = libraryPart?.pegboardParameters
+      ? resolvePegboardParameters(widthMm, lengthMm, libraryPart.pegboardParameters)
+      : null;
+    const pegboardHoles = pegboardParameters
+      ? calculatePegboardHoles(widthMm, lengthMm, pegboardParameters).map((hole, index) => ({
+          id: `PEG-${index + 1}`,
+          xFromCenterMm: hole.xMm,
+          zFromCenterMm: hole.zMm,
+          diameterMm: pegboardParameters.holeDiameter,
+        }))
+      : [];
+    const rotation = new THREE.Euler(
+      degToRad(transform.rotX),
+      degToRad(transform.rotY),
+      degToRad(transform.rotZ),
+      "XYZ",
+    );
+    const panelCenter = new THREE.Vector3(...getPartWorldPosition(partId, dimensions, addedParts, transforms));
+    const holeAxis = new THREE.Vector3(0, Math.sign(transform.scaleY || 1), 0).applyEuler(rotation).normalize();
+    return [...instanceHoles, ...cornerHoles, ...pegboardHoles].map((hole) => {
+      const localOffset = new THREE.Vector3(
+        mmToScene(hole.xFromCenterMm) * transform.scaleX,
+        0,
+        mmToScene(hole.zFromCenterMm) * transform.scaleZ,
+      ).applyEuler(rotation);
+      return {
+        panelId: partId,
+        holeId: hole.id,
+        center: panelCenter.clone().add(localOffset).toArray() as Vec3Tuple,
+        axis: holeAxis.toArray() as Vec3Tuple,
+        diameter: hole.diameterMm * Math.min(Math.abs(transform.scaleX), Math.abs(transform.scaleZ)),
+      } satisfies PanelHoleTarget;
+    });
+  };
+  const builtIn = panels
+    .filter(({ id }) => isVisible(id))
+    .flatMap(({ id }) => targetsForPanel(id, transforms[id] ?? {
+      ...getDefaultTransform(id),
+      sizeX: Math.max(100, dimensions.width - 20),
+      sizeZ: Math.max(100, dimensions.depth - 15),
+    }));
+  const added = addedParts
+    .filter(({ id, kind }) => kind === "panel" && isVisible(id))
+    .flatMap((part) => targetsForPanel(part.id, getPartTransform(transforms, part.id), part.libraryPart));
   return [...builtIn, ...added];
 }
 
@@ -2124,6 +2232,51 @@ function parameterizedPanelLibraryPart(part: LibraryPart, transform: PartTransfo
       length: transform.sizeZ,
       height: transform.sizeY,
     },
+  };
+}
+
+function buildPreciseBoxPart({
+  id,
+  dimensions,
+  addedParts,
+  transforms,
+}: {
+  id: string;
+  dimensions: FrameDimensions;
+  addedParts: AddedPart[];
+  transforms: Record<string, PartTransform>;
+}): BoxAssemblyPart | null {
+  const info = getPartInfo(id, "zh", new Set(), addedParts);
+  if (info.kind === "rod") return null;
+  const transform = transforms[id] ?? (id.startsWith("P-") && allPartIds.includes(id)
+    ? {
+        ...getDefaultTransform(id),
+        sizeX: Math.max(100, dimensions.width - 20),
+        sizeZ: Math.max(100, dimensions.depth - 15),
+      }
+    : getPartTransform(transforms, id));
+  const addedPart = addedParts.find((part) => part.id === id);
+  const renderedPart = addedPart?.libraryPart
+    ? addedPart.kind === "panel"
+      ? parameterizedPanelLibraryPart(addedPart.libraryPart, transform)
+      : addedPart.libraryPart
+    : null;
+  const rawSize = renderedPart
+    ? componentSceneSize(renderedPart.dimensions)
+    : [
+        mmToScene(transform.sizeX),
+        mmToScene(transform.sizeY),
+        mmToScene(transform.sizeZ),
+      ] satisfies Vec3Tuple;
+  return {
+    partId: id,
+    center: getPartWorldPosition(id, dimensions, addedParts, transforms),
+    size: rawSize.map((value, index) => value * Math.abs([
+      transform.scaleX,
+      transform.scaleY,
+      transform.scaleZ,
+    ][index])) as Vec3Tuple,
+    rotation: [transform.rotX, transform.rotY, transform.rotZ],
   };
 }
 
@@ -5801,79 +5954,15 @@ function ThreeRackScene({
   const panelContactTargets = useMemo<PanelContactTarget[]>(() => {
     return buildPanelContactTargets({ dimensions, addedParts, transforms, deletedIds, hiddenIds, isolatedIds });
   }, [addedParts, deletedIds, dimensions, hiddenIds, isolatedIds, transforms]);
-  const panelHoleTargets = useMemo<PanelHoleTarget[]>(() => {
-    const targetsForPanel = (partId: string, transform: PartTransform, libraryPart?: LibraryPart) => {
-      const widthMm = transform.sizeX;
-      const lengthMm = transform.sizeZ;
-      const instanceHoles = normalizePanelCutouts(panelCutouts[partId], {
-        widthMm,
-        lengthMm,
-        thicknessMm: transform.sizeY,
-      }).map((hole) => ({
-        id: hole.id,
-        xFromCenterMm: hole.xMm - widthMm / 2,
-        zFromCenterMm: hole.zMm - lengthMm / 2,
-        diameterMm: hole.diameterMm,
-      }));
-      const cornerHoles = libraryPart?.cornerHolePanelParameters
-        ? [
-            [-widthMm / 2 + libraryPart.cornerHolePanelParameters.holeInsetX, -lengthMm / 2 + libraryPart.cornerHolePanelParameters.holeInsetZ],
-            [widthMm / 2 - libraryPart.cornerHolePanelParameters.holeInsetX, -lengthMm / 2 + libraryPart.cornerHolePanelParameters.holeInsetZ],
-            [widthMm / 2 - libraryPart.cornerHolePanelParameters.holeInsetX, lengthMm / 2 - libraryPart.cornerHolePanelParameters.holeInsetZ],
-            [-widthMm / 2 + libraryPart.cornerHolePanelParameters.holeInsetX, lengthMm / 2 - libraryPart.cornerHolePanelParameters.holeInsetZ],
-          ].map(([xFromCenterMm, zFromCenterMm], index) => ({
-            id: `CORNER-${index + 1}`,
-            xFromCenterMm,
-            zFromCenterMm,
-            diameterMm: libraryPart.cornerHolePanelParameters!.holeDiameter,
-          }))
-        : [];
-      const pegboardParameters = libraryPart?.pegboardParameters
-        ? resolvePegboardParameters(widthMm, lengthMm, libraryPart.pegboardParameters)
-        : null;
-      const pegboardHoles = pegboardParameters
-        ? calculatePegboardHoles(widthMm, lengthMm, pegboardParameters).map((hole, index) => ({
-            id: `PEG-${index + 1}`,
-            xFromCenterMm: hole.xMm,
-            zFromCenterMm: hole.zMm,
-            diameterMm: pegboardParameters.holeDiameter,
-          }))
-        : [];
-      const rotation = new THREE.Euler(
-        degToRad(transform.rotX),
-        degToRad(transform.rotY),
-        degToRad(transform.rotZ),
-        "XYZ",
-      );
-      const panelCenter = new THREE.Vector3(...getPartWorldPosition(partId, dimensions, addedParts, transforms));
-      const holeAxis = new THREE.Vector3(0, Math.sign(transform.scaleY || 1), 0).applyEuler(rotation).normalize();
-      return [...instanceHoles, ...cornerHoles, ...pegboardHoles].map((hole) => {
-        const localOffset = new THREE.Vector3(
-          mmToScene(hole.xFromCenterMm) * transform.scaleX,
-          0,
-          mmToScene(hole.zFromCenterMm) * transform.scaleZ,
-        ).applyEuler(rotation);
-        return {
-          panelId: partId,
-          holeId: hole.id,
-          center: panelCenter.clone().add(localOffset).toArray() as Vec3Tuple,
-          axis: holeAxis.toArray() as Vec3Tuple,
-          diameter: hole.diameterMm * Math.min(Math.abs(transform.scaleX), Math.abs(transform.scaleZ)),
-        } satisfies PanelHoleTarget;
-      });
-    };
-    const builtIn = panels
-      .filter(({ id }) => isVisible(id))
-      .flatMap(({ id }) => targetsForPanel(id, transforms[id] ?? {
-        ...getDefaultTransform(id),
-        sizeX: Math.max(100, dimensions.width - 20),
-        sizeZ: Math.max(100, dimensions.depth - 15),
-      }));
-    const added = addedParts
-      .filter(({ id, kind }) => kind === "panel" && isVisible(id))
-      .flatMap((part) => targetsForPanel(part.id, getPartTransform(transforms, part.id), part.libraryPart));
-    return [...builtIn, ...added];
-  }, [addedParts, deletedIds, dimensions, hiddenIds, isolatedIds, panelCutouts, transforms]);
+  const panelHoleTargets = useMemo<PanelHoleTarget[]>(() => buildPanelHoleTargets({
+    dimensions,
+    addedParts,
+    transforms,
+    panelCutouts,
+    deletedIds,
+    hiddenIds,
+    isolatedIds,
+  }), [addedParts, deletedIds, dimensions, hiddenIds, isolatedIds, panelCutouts, transforms]);
   const smartSnapResolver = useCallback((
     connectorId: string,
     ports: ComponentPort[],
@@ -6372,6 +6461,7 @@ function CanvasPanel({
   lockedIds,
   isolatedIds,
   assemblyConnections,
+  preciseAssemblyRelations,
   focusRequest,
   onSelect,
   onSelectMany,
@@ -6384,6 +6474,10 @@ function CanvasPanel({
   onAlignPair,
   onConnectPair,
   canConnectPair,
+  onSurfaceContact,
+  onSurfaceGap,
+  canSurfacePair,
+  onExchangePair,
   onMirrorSelection,
   onFlipSelection,
   onRotateSelection,
@@ -6430,6 +6524,7 @@ function CanvasPanel({
   lockedIds: ReadonlySet<string>;
   isolatedIds: ReadonlySet<string>;
   assemblyConnections: AssemblyConnection[];
+  preciseAssemblyRelations: PreciseAssemblyRelation[];
   focusRequest: number;
   onSelect: (id: string, additive?: boolean) => void;
   onSelectMany: (ids: string[]) => void;
@@ -6442,6 +6537,10 @@ function CanvasPanel({
   onAlignPair: (axis: AlignmentAxis) => void;
   onConnectPair: () => void;
   canConnectPair: boolean;
+  onSurfaceContact: () => void;
+  onSurfaceGap: (gapMm: number) => void;
+  canSurfacePair: boolean;
+  onExchangePair: () => void;
   onMirrorSelection: () => void;
   onFlipSelection: (direction: FlipDirection) => void;
   onRotateSelection: (axis: QuickRotateAxis, direction: QuickRotateDirection) => void;
@@ -6472,6 +6571,7 @@ function CanvasPanel({
   lang: Lang;
 }) {
   const [view, setView] = useState<ViewMode>("perspective");
+  const [pairGapMm, setPairGapMm] = useState(5);
   const [renderMode, setRenderMode] = useState<RenderMode>("solid");
   const [expandedToolbar, setExpandedToolbar] = useState<"view" | "render" | "background" | "selection" | "transform" | null>(null);
   const [transformMode, setTransformMode] = useState<TransformMode>("translate");
@@ -6796,6 +6896,8 @@ function CanvasPanel({
             <Target size={14} />
             <span>{selectedIds[0]} {lang === "zh" ? "固定" : "FIXED"}</span>
             <strong>→ {selectedIds[1]} {lang === "zh" ? "适应" : "ADAPTS"}</strong>
+            <em>{preciseAssemblyRelations.filter((relation) =>
+              selectedIds.includes(relation.fixedPartId) && selectedIds.includes(relation.movingPartId)).length} {lang === "zh" ? "关系" : "REL"}</em>
           </div>
           <div className="pair-align-actions" role="group" aria-label={lang === "zh" ? "中心对齐" : "CENTER ALIGNMENT"}>
             {(["x", "y", "z"] as const).map((axis) => (
@@ -6803,6 +6905,42 @@ function CanvasPanel({
                 {axis.toUpperCase()} {lang === "zh" ? "对齐" : "ALIGN"}
               </button>
             ))}
+          </div>
+          <div className="pair-precise-actions" role="group" aria-label={lang === "zh" ? "精确装配" : "PRECISE ASSEMBLY"}>
+            <button
+              type="button"
+              data-testid="pair-surface-contact"
+              disabled={!canSurfacePair}
+              title={lang === "zh" ? "保持 A 不动，使 B 的相对表面贴合" : "KEEP A FIXED AND FIT B TO THE OPPOSING FACE"}
+              onClick={onSurfaceContact}
+            >
+              {lang === "zh" ? "表面贴合" : "CONTACT"}
+            </button>
+            <label className="pair-gap-field">
+              <span>{lang === "zh" ? "间距" : "GAP"}</span>
+              <input
+                data-testid="pair-surface-gap-input"
+                type="number"
+                min="0"
+                step="0.1"
+                value={pairGapMm}
+                disabled={!canSurfacePair}
+                aria-label={lang === "zh" ? "表面间距毫米" : "SURFACE GAP MILLIMETERS"}
+                onChange={(event) => setPairGapMm(Math.max(0, Number(event.target.value) || 0))}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && canSurfacePair) onSurfaceGap(pairGapMm);
+                }}
+              />
+              <b>mm</b>
+            </label>
+            <button
+              type="button"
+              data-testid="pair-apply-surface-gap"
+              disabled={!canSurfacePair}
+              onClick={() => onSurfaceGap(pairGapMm)}
+            >
+              {lang === "zh" ? "应用" : "APPLY"}
+            </button>
           </div>
           <button
             className="pair-connect-button"
@@ -6815,6 +6953,15 @@ function CanvasPanel({
             onClick={onConnectPair}
           >
             <WandSparkles size={14} />{lang === "zh" ? "智能连接" : "SMART CONNECT"}
+          </button>
+          <button
+            className="pair-swap-button"
+            type="button"
+            data-testid="pair-swap-anchor"
+            title={lang === "zh" ? "交换固定组件和移动组件" : "SWAP FIXED AND MOVING PARTS"}
+            onClick={onExchangePair}
+          >
+            {lang === "zh" ? "交换基准" : "SWAP"}
           </button>
         </div>
       )}
@@ -7176,7 +7323,7 @@ function MaterialSelector({
   );
 }
 
-type InspectorSectionId = "structure" | "identity" | "material" | "drilling" | "transform" | "rotation" | "actions";
+type InspectorSectionId = "structure" | "assembly" | "identity" | "material" | "drilling" | "transform" | "rotation" | "actions";
 
 function InspectorSection({
   id,
@@ -7535,6 +7682,20 @@ function OverallDimensionsPanel({
         </div>
         <button className="primary-button full" type="submit"><Maximize2 size={15} />{isZh ? "应用并自适应" : "APPLY & ADAPT"}</button>
       </form>
+      <section className="overall-target-comparison" aria-label={isZh ? "目标与实际尺寸差值" : "TARGET AND ACTUAL SIZE DELTA"}>
+        <div>
+          <span>{isZh ? "目标尺寸" : "TARGET"}</span>
+          <strong>{draft.width.toFixed(1)} × {draft.depth.toFixed(1)} × {draft.height.toFixed(1)} MM</strong>
+        </div>
+        <div>
+          <span>{isZh ? "与实际差值" : "DELTA TO ACTUAL"}</span>
+          <strong>
+            W {(draft.width - actualDimensions.width).toFixed(1)}
+            {" · "}D {(draft.depth - actualDimensions.depth).toFixed(1)}
+            {" · "}H {(draft.height - actualDimensions.height).toFixed(1)} MM
+          </strong>
+        </div>
+      </section>
       <section className="overall-actual-envelope">
         <span>{isZh ? "当前实际外包络" : "CURRENT OUTER ENVELOPE"}</span>
         <strong>{actualDimensions.width} × {actualDimensions.depth} × {actualDimensions.height} MM</strong>
@@ -7550,6 +7711,7 @@ function InspectorPanel({
   overallDimensions,
   structuralAnalysis,
   structuralIssues,
+  preciseRelations,
   mixedKinds,
   transform,
   shaftLength,
@@ -7577,6 +7739,8 @@ function InspectorPanel({
   onQuickFix,
   onQuickRotate,
   onLocateBom,
+  onRemovePreciseRelation,
+  onUpdatePreciseRelation,
   collapsed,
   onToggleCollapsed,
   lang,
@@ -7586,6 +7750,7 @@ function InspectorPanel({
   overallDimensions: FrameDimensions;
   structuralAnalysis: StructuralAnalysis;
   structuralIssues: StructuralIssue[];
+  preciseRelations: PreciseAssemblyRelation[];
   mixedKinds: boolean;
   transform: PartTransform;
   shaftLength?: number;
@@ -7613,6 +7778,11 @@ function InspectorPanel({
   onQuickFix: () => void;
   onQuickRotate: (axis: QuickRotateAxis, direction: QuickRotateDirection) => void;
   onLocateBom: () => void;
+  onRemovePreciseRelation: (relationId: string) => void;
+  onUpdatePreciseRelation: (
+    relationId: string,
+    patch: Partial<Pick<PreciseAssemblyRelation, "gapMm" | "axialReference" | "axialOffsetMm">>,
+  ) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   lang: Lang;
@@ -7640,6 +7810,7 @@ function InspectorPanel({
   const hasStructuralWarning = structuralIssues.some((issue) => issue.severity === "warning");
   const [openSections, setOpenSections] = useState<Record<InspectorSectionId, boolean>>({
     structure: false,
+    assembly: true,
     identity: true,
     material: false,
     drilling: true,
@@ -7760,6 +7931,95 @@ function InspectorPanel({
           onToggle={() => toggleSection("structure")}
         >
           <StructuralStatusCard analysis={structuralAnalysis} issues={structuralIssues} lang={lang} compact />
+        </InspectorSection>
+
+        <InspectorSection
+          id="assembly"
+          title={lang === "zh" ? "装配关系" : "ASSEMBLY RELATIONS"}
+          summary={lang === "zh" ? `${preciseRelations.length} 条关系` : `${preciseRelations.length} RELATION${preciseRelations.length === 1 ? "" : "S"}`}
+          tone={preciseRelations.some(({ status }) => status === "invalid")
+            ? "danger"
+            : preciseRelations.some(({ status }) => status === "warning")
+              ? "warning"
+              : preciseRelations.length > 0 ? "success" : "neutral"}
+          open={openSections.assembly}
+          onToggle={() => toggleSection("assembly")}
+        >
+          {preciseRelations.length === 0 ? (
+            <p className="assembly-relation-empty">{lang === "zh"
+              ? "双选组件后，可建立表面贴合、毫米间距或孔轴同心关系。"
+              : "SELECT TWO PARTS TO CREATE CONTACT, GAP, OR SHAFT-BORE RELATIONS."}</p>
+          ) : (
+            <div className="assembly-relation-list">
+              {preciseRelations.map((relation) => (
+                <article key={relation.id} data-relation-status={relation.status}>
+                  <div>
+                    <strong>{relation.type === "surface-contact"
+                      ? (lang === "zh" ? "表面贴合" : "SURFACE CONTACT")
+                      : relation.type === "surface-gap"
+                        ? (lang === "zh" ? `表面间距 ${relation.gapMm?.toFixed(1) ?? "0.0"} mm` : `SURFACE GAP ${relation.gapMm?.toFixed(1) ?? "0.0"} MM`)
+                        : (lang === "zh" ? "孔轴同心" : "SHAFT / BORE")}</strong>
+                    <span>{relation.fixedPartId} → {relation.movingPartId}</span>
+                    <small>{relation.fixedFeatureId} ↔ {relation.movingFeatureId} · {relation.residualMm.toFixed(1)} mm</small>
+                    {relation.message && <em>{relation.message}</em>}
+                    {relation.type === "shaft-bore" ? (
+                      <div className="assembly-relation-editor">
+                        <select
+                          aria-label={lang === "zh" ? "轴向位置模式" : "AXIAL POSITION MODE"}
+                          value={relation.axialReference ?? "preserve"}
+                          onChange={(event) => onUpdatePreciseRelation(relation.id, {
+                            axialReference: event.target.value as PreciseAssemblyRelation["axialReference"],
+                          })}
+                        >
+                          <option value="preserve">{lang === "zh" ? "保持当前位置" : "PRESERVE"}</option>
+                          <option value="shaft-center">{lang === "zh" ? "孔对齐轴中心" : "SHAFT CENTER"}</option>
+                          <option value="shaft-start">{lang === "zh" ? "距轴起点" : "FROM START"}</option>
+                          <option value="shaft-end">{lang === "zh" ? "距轴终点" : "FROM END"}</option>
+                        </select>
+                        {(relation.axialReference === "shaft-start" || relation.axialReference === "shaft-end") && (
+                          <label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value={relation.axialOffsetMm ?? 0}
+                              aria-label={lang === "zh" ? "轴向偏移毫米" : "AXIAL OFFSET MILLIMETERS"}
+                              onChange={(event) => onUpdatePreciseRelation(relation.id, {
+                                axialOffsetMm: Math.max(0, Number(event.target.value) || 0),
+                              })}
+                            />
+                            <span>mm</span>
+                          </label>
+                        )}
+                      </div>
+                    ) : (
+                      <label className="assembly-relation-gap-editor">
+                        <span>{lang === "zh" ? "净距" : "GAP"}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={relation.gapMm ?? 0}
+                          aria-label={lang === "zh" ? "装配关系表面间距毫米" : "RELATION SURFACE GAP MILLIMETERS"}
+                          onChange={(event) => onUpdatePreciseRelation(relation.id, {
+                            gapMm: Math.max(0, Number(event.target.value) || 0),
+                          })}
+                        />
+                        <b>mm</b>
+                      </label>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    aria-label={`${lang === "zh" ? "解除装配关系" : "REMOVE ASSEMBLY RELATION"} ${relation.id}`}
+                    onClick={() => onRemovePreciseRelation(relation.id)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </article>
+              ))}
+            </div>
+          )}
         </InspectorSection>
 
         <InspectorSection
@@ -8165,6 +8425,7 @@ export function App() {
   const [lockedIds, setLockedIds] = useState<Set<string>>(() => new Set());
   const [isolatedIds, setIsolatedIds] = useState<Set<string>>(() => new Set());
   const [assemblyConnections, setAssemblyConnections] = useState<AssemblyConnection[]>([]);
+  const [preciseAssemblyRelations, setPreciseAssemblyRelations] = useState<PreciseAssemblyRelation[]>([]);
   const [undoStack, setUndoStack] = useState<EditorHistoryEntry<EditorSnapshot>[]>([]);
   const [redoStack, setRedoStack] = useState<EditorHistoryEntry<EditorSnapshot>[]>([]);
   const [saveStatus, setSaveStatus] = useState<"saved" | "unsaved" | "saving" | "failed">("saved");
@@ -8235,6 +8496,9 @@ export function App() {
   } : selectedBaseInfo;
   const selectedAssemblyConnections = assemblyConnections.filter((connection) =>
     connection.connectorId === selectedId || connection.shaftId === selectedId,
+  );
+  const selectedPreciseRelations = preciseAssemblyRelations.filter((relation) =>
+    relation.fixedPartId === selectedId || relation.movingPartId === selectedId,
   );
   const selected = selectedAssemblyConnections.length > 0 && !parameterizedSelectedInfo.warning
     ? {
@@ -8309,7 +8573,8 @@ export function App() {
     lockedIds: [...lockedIds],
     isolatedIds: [...isolatedIds],
     assemblyConnections,
-  }), [addedParts, assemblyConnections, background, deletedIds, dimensions, hiddenIds, isolatedIds, lockedIds, materials, panelCutouts, referenceImageDataUrl, referenceImageVisible, resolvedRiskIds, transforms, userGroups]);
+    preciseAssemblyRelations,
+  }), [addedParts, assemblyConnections, background, deletedIds, dimensions, hiddenIds, isolatedIds, lockedIds, materials, panelCutouts, preciseAssemblyRelations, referenceImageDataUrl, referenceImageVisible, resolvedRiskIds, transforms, userGroups]);
 
   const applySnapshot = useCallback((snapshot: EditorSnapshot) => {
     const migrated = migrateRetiredCrossClampSnapshot(snapshot);
@@ -8336,6 +8601,7 @@ export function App() {
     setLockedIds(new Set(migrated.lockedIds ?? []));
     setIsolatedIds(new Set((migrated.isolatedIds ?? []).filter((id) => !restoredHiddenIds.has(id))));
     setAssemblyConnections(migrated.assemblyConnections ?? []);
+    setPreciseAssemblyRelations(migrated.preciseAssemblyRelations ?? []);
   }, []);
 
   const recordHistory = useCallback((command: EditorCommandName = "edit") => {
@@ -8387,6 +8653,7 @@ export function App() {
       setLockedIds(new Set());
       setIsolatedIds(new Set());
       setAssemblyConnections([]);
+      setPreciseAssemblyRelations([]);
       const visibleIds = allPartIds.filter((id) => !template.deletedPartIds.includes(id));
       const nextSelectedId = visibleIds[0] ?? "J-010";
       setSelectedId(nextSelectedId);
@@ -8738,8 +9005,56 @@ export function App() {
         height: effectiveFactors.height * correction.height,
       };
     }
+    let nextPreciseRelations = [...preciseAssemblyRelations];
+    preciseAssemblyRelations.filter(({ type, status }) =>
+      type !== "shaft-bore" && status !== "invalid",
+    ).forEach((relation) => {
+      const relationTransforms = { ...transforms, ...nextTransforms };
+      const fixed = buildPreciseBoxPart({
+        id: relation.fixedPartId,
+        dimensions: nextFrameDimensions,
+        addedParts,
+        transforms: relationTransforms,
+      });
+      const moving = buildPreciseBoxPart({
+        id: relation.movingPartId,
+        dimensions: nextFrameDimensions,
+        addedParts,
+        transforms: relationTransforms,
+      });
+      if (!fixed || !moving) return;
+      const solved = solveSurfaceRelation({
+        fixed,
+        moving,
+        gapMm: relation.gapMm ?? 0,
+        fixedFeatureId: relation.fixedFeatureId,
+        movingFeatureId: relation.movingFeatureId,
+      });
+      if (!solved.ok) {
+        nextPreciseRelations = nextPreciseRelations.map((candidate) => candidate.id === relation.id
+          ? {
+              ...candidate,
+              status: "invalid" as const,
+              message: preciseRelationFailureMessage(solved.reason, lang),
+            }
+          : candidate);
+        return;
+      }
+      const before = getPartTransform(relationTransforms, relation.movingPartId);
+      nextTransforms[relation.movingPartId] = transformAtWorldPoint(
+        relation.movingPartId,
+        addVec3(moving.center, solved.candidate.translation),
+        nextFrameDimensions,
+        addedParts,
+        before,
+      );
+      nextPreciseRelations = nextPreciseRelations.map((candidate) => candidate.id === relation.id
+        ? { ...candidate, status: "valid" as const, residualMm: 0, message: undefined }
+        : candidate);
+    });
     setDimensions(nextFrameDimensions);
     setTransforms((current) => ({ ...current, ...nextTransforms }));
+    setPreciseAssemblyRelations(nextPreciseRelations);
     setPanelCutouts((current) => Object.fromEntries(Object.entries(current).map(([id, cutouts]) => {
       const defaultBefore = getPartTransform(transforms, id);
       const before = id.startsWith("P-") && !transforms[id]
@@ -8774,6 +9089,17 @@ export function App() {
       const connectorInside = transformedSet.has(connection.connectorId);
       const shaftInside = transformedSet.has(connection.shaftId);
       return connectorInside === shaftInside;
+    }));
+    setPreciseAssemblyRelations((current) => current.map((relation) => {
+      const fixedInside = transformedSet.has(relation.fixedPartId);
+      const movingInside = transformedSet.has(relation.movingPartId);
+      return fixedInside === movingInside
+        ? relation
+        : {
+            ...relation,
+            status: "invalid" as const,
+            message: lang === "zh" ? "关系只有一端参与了编组变换" : "ONLY ONE RELATION ENDPOINT WAS GROUP-TRANSFORMED",
+          };
     }));
     setSaveStatus("unsaved");
     setAlignmentNotice(lang === "zh"
@@ -8870,6 +9196,13 @@ export function App() {
       !selectedSet.has(connection.connectorId) && !selectedSet.has(connection.shaftId),
     ));
   };
+  const invalidatePreciseRelationsForParts = (partIds: readonly string[], message: string) => {
+    const partSet = new Set(partIds);
+    setPreciseAssemblyRelations((current) => current.map((relation) =>
+      partSet.has(relation.fixedPartId) || partSet.has(relation.movingPartId)
+        ? { ...relation, status: "invalid" as const, message }
+        : relation));
+  };
   const updateSelectedShaftParameters = (diameter: number, length: number) => {
     recordHistory("change-parameter");
     setTransforms((current) => ({
@@ -8889,6 +9222,9 @@ export function App() {
     setAssemblyConnections((current) => current.filter((connection) =>
       !selectedSet.has(connection.connectorId) && !selectedSet.has(connection.shaftId),
     ));
+    invalidatePreciseRelationsForParts(selectedIds, lang === "zh"
+      ? "光轴参数已改变，需要重新校验孔径和轴向位置"
+      : "SHAFT PARAMETERS CHANGED; BORE FIT AND AXIAL POSITION REQUIRE VALIDATION");
   };
   const updateSelectedShaftStopParameters = (parameter: ShaftStopParameterKey, value: number) => {
     if (!selectedShaftStopParameters) return;
@@ -8925,6 +9261,7 @@ export function App() {
       },
     }));
     setAssemblyConnections((current) => current.filter((connection) => connection.connectorId !== selectedId));
+    invalidatePreciseRelationsForParts([selectedId], lang === "zh" ? "组件规格已改变，需要重新求解" : "COMPONENT VARIANT CHANGED; RESOLVE REQUIRED");
     setSaveStatus("unsaved");
   };
   const updateSelectedParallelClampParameters = (parameter: ParallelClampParameterKey, value: number) => {
@@ -8961,6 +9298,7 @@ export function App() {
       },
     }));
     setAssemblyConnections((current) => current.filter((connection) => connection.connectorId !== selectedId));
+    invalidatePreciseRelationsForParts([selectedId], lang === "zh" ? "组件规格已改变，需要重新求解" : "COMPONENT VARIANT CHANGED; RESOLVE REQUIRED");
     setSaveStatus("unsaved");
   };
   const updateSelectedEqualBoreCrossClampModel = (diameter: number) => {
@@ -8987,6 +9325,7 @@ export function App() {
       },
     }));
     setAssemblyConnections((current) => current.filter((connection) => connection.connectorId !== selectedId));
+    invalidatePreciseRelationsForParts([selectedId], lang === "zh" ? "组件规格已改变，需要重新求解" : "COMPONENT VARIANT CHANGED; RESOLVE REQUIRED");
     setSaveStatus("unsaved");
   };
   const updateSelectedEqualBoreTClampModel = (diameter: number) => {
@@ -9014,6 +9353,7 @@ export function App() {
       },
     }));
     setAssemblyConnections((current) => current.filter((connection) => connection.connectorId !== selectedId));
+    invalidatePreciseRelationsForParts([selectedId], lang === "zh" ? "组件规格已改变，需要重新求解" : "COMPONENT VARIANT CHANGED; RESOLVE REQUIRED");
     setSaveStatus("unsaved");
   };
   const updateSelectedRoundFixedBaseInnerDiameter = (innerDiameter: number) => {
@@ -9041,6 +9381,7 @@ export function App() {
       },
     }));
     setAssemblyConnections((current) => current.filter((connection) => connection.connectorId !== selectedId));
+    invalidatePreciseRelationsForParts([selectedId], lang === "zh" ? "组件规格已改变，需要重新求解" : "COMPONENT VARIANT CHANGED; RESOLVE REQUIRED");
     setSaveStatus("unsaved");
   };
   const updateSelectedVerticalFixedBaseModel = (model: string) => {
@@ -9068,6 +9409,7 @@ export function App() {
       },
     }));
     setAssemblyConnections((current) => current.filter((connection) => connection.connectorId !== selectedId));
+    invalidatePreciseRelationsForParts([selectedId], lang === "zh" ? "组件规格已改变，需要重新求解" : "COMPONENT VARIANT CHANGED; RESOLVE REQUIRED");
     setSaveStatus("unsaved");
   };
   const updatePartTransform: TransformChangeHandler = (id, next, connections = []) => {
@@ -9087,6 +9429,14 @@ export function App() {
       ...current.filter((connection) => connection.connectorId !== id && connection.shaftId !== id),
       ...connections,
     ]);
+    setPreciseAssemblyRelations((current) => current.map((relation) =>
+      relation.fixedPartId === id || relation.movingPartId === id
+        ? {
+            ...relation,
+            status: "invalid" as const,
+            message: lang === "zh" ? "组件已手动变换，需要重新求解" : "PART WAS TRANSFORMED; RESOLVE REQUIRED",
+          }
+        : relation));
   };
   const selectedPairKinds = selectedIds.map((id) => ({
     id,
@@ -9094,10 +9444,15 @@ export function App() {
   }));
   const selectedPairShaft = selectedPairKinds.find(({ kind }) => kind === "rod");
   const selectedPairConnector = selectedPairKinds.find(({ kind }) => kind === "joint");
+  const selectedPairPanel = selectedPairKinds.find(({ kind }) => kind === "panel");
   const selectedPairConnectors = selectedPairKinds.filter(({ kind }) => kind === "joint");
+  const selectedPairSurfaceParts = selectedPairKinds.filter(({ kind }) => kind !== "rod");
   const selectedPairMovingId = selectedIds[1] ?? "";
   const canConnectSelectedPair = selectedIds.length === 2
-    && (Boolean(selectedPairShaft) && Boolean(selectedPairConnector) || selectedPairConnectors.length === 2)
+    && (Boolean(selectedPairShaft) && Boolean(selectedPairConnector || selectedPairPanel) || selectedPairConnectors.length === 2)
+    && !lockedIds.has(selectedPairMovingId);
+  const canSurfaceSelectedPair = selectedIds.length === 2
+    && selectedPairSurfaceParts.length === 2
     && !lockedIds.has(selectedPairMovingId);
   const alignSelectedPair = (axis: AlignmentAxis) => {
     if (selectedIds.length !== 2) return;
@@ -9132,6 +9487,76 @@ export function App() {
     setAlignmentNotice(lang === "zh"
       ? `${movingId} 已沿 ${axis.toUpperCase()} 轴对齐 ${anchorId}`
       : `${movingId} ALIGNED TO ${anchorId} ON ${axis.toUpperCase()}`);
+  };
+  const setSelectedPairSurfaceGap = (gapMm: number) => {
+    if (selectedIds.length !== 2 || !canSurfaceSelectedPair) {
+      setAlignmentNotice(lang === "zh"
+        ? "表面关系需要选择两个连接件或层板"
+        : "SELECT TWO CONNECTORS OR PANELS FOR A SURFACE RELATION");
+      return;
+    }
+    const fixedPartId = selectedIds[0];
+    const movingPartId = selectedIds[1];
+    const fixed = buildPreciseBoxPart({ id: fixedPartId, dimensions, addedParts, transforms });
+    const moving = buildPreciseBoxPart({ id: movingPartId, dimensions, addedParts, transforms });
+    if (!fixed || !moving) {
+      setAlignmentNotice(lang === "zh" ? "所选组件没有可用装配表面" : "NO ASSEMBLY FACES AVAILABLE");
+      return;
+    }
+    const solved = solveSurfaceRelation({ fixed, moving, gapMm });
+    if (!solved.ok) {
+      setAlignmentNotice(preciseRelationFailureMessage(solved.reason, lang));
+      return;
+    }
+    const movingTransform = getPartTransform(transforms, movingPartId);
+    const nextWorldPosition = addVec3(moving.center, solved.candidate.translation);
+    const relation = createSurfaceRelation({
+      id: `REL-SURFACE-${fixedPartId}-${movingPartId}`,
+      fixedPartId,
+      movingPartId,
+      candidate: solved.candidate,
+    });
+    recordHistory("align");
+    setTransforms((current) => ({
+      ...current,
+      [movingPartId]: transformAtWorldPoint(
+        movingPartId,
+        nextWorldPosition,
+        dimensions,
+        addedParts,
+        movingTransform,
+      ),
+    }));
+    setAssemblyConnections((current) => current.filter((connection) =>
+      connection.connectorId !== movingPartId && connection.shaftId !== movingPartId,
+    ));
+    setPreciseAssemblyRelations((current) => replacePairRelation(
+      current.map((candidate) => candidate.id !== relation.id
+        && (candidate.fixedPartId === movingPartId || candidate.movingPartId === movingPartId)
+        ? {
+            ...candidate,
+            status: "invalid" as const,
+            message: lang === "zh" ? "组件位置已改变，需要重新求解" : "PART MOVED; RELATION REQUIRES RESOLVE",
+          }
+        : candidate),
+      relation,
+    ));
+    setAlignmentNotice(lang === "zh"
+      ? gapMm === 0
+        ? `已保持 ${fixedPartId} 不动，并将 ${movingPartId} 表面贴合`
+        : `已保持 ${fixedPartId} 不动，并设置 ${movingPartId} 表面间距 ${gapMm.toFixed(1)} mm`
+      : gapMm === 0
+        ? `KEPT ${fixedPartId} FIXED AND FIT ${movingPartId} FACE-TO-FACE`
+        : `KEPT ${fixedPartId} FIXED · ${movingPartId} GAP ${gapMm.toFixed(1)} MM`);
+  };
+  const exchangeSelectedPair = () => {
+    if (selectedIds.length !== 2) return;
+    const [fixedPartId, movingPartId] = selectedIds;
+    setSelectedIds([movingPartId, fixedPartId]);
+    setSelectedId(fixedPartId);
+    setAlignmentNotice(lang === "zh"
+      ? `已交换基准：${movingPartId} 固定，${fixedPartId} 移动`
+      : `ANCHOR SWAPPED: ${movingPartId} FIXED, ${fixedPartId} MOVES`);
   };
   const smartConnectSelectedPair = () => {
     if (selectedIds.length !== 2) {
@@ -9188,13 +9613,113 @@ export function App() {
       setAssemblyConnections((current) => current.filter((connection) =>
         connection.connectorId !== movingId && connection.shaftId !== movingId,
       ));
+      setPreciseAssemblyRelations((current) => replacePairRelation(current, {
+        id: `REL-SURFACE-${anchorId}-${movingId}`,
+        type: "surface-contact",
+        fixedPartId: anchorId,
+        movingPartId: movingId,
+        fixedFeatureId: "auto-envelope-face",
+        movingFeatureId: "auto-envelope-face",
+        gapMm: 0,
+        status: "valid",
+        residualMm: 0,
+      }));
       setAlignmentNotice(lang === "zh"
         ? `已保持 ${anchorId} 不动，并将 ${movingId} 表面贴合到 ${anchorId}`
         : `KEPT ${anchorId} FIXED AND FIT ${movingId} FACE-TO-FACE`);
       return;
     }
+    if (selectedPairShaft && selectedPairPanel) {
+      const shaftId = selectedPairShaft.id;
+      const panelId = selectedPairPanel.id;
+      const shaft = buildVisibleShaftSegments({
+        dimensions,
+        addedParts,
+        transforms,
+        deletedIds,
+        hiddenIds,
+        isolatedIds,
+      }).find((segment) => segment.partId === shaftId);
+      const holes = buildPanelHoleTargets({
+        dimensions,
+        addedParts,
+        transforms,
+        panelCutouts,
+        deletedIds,
+        hiddenIds,
+        isolatedIds,
+        onlyPartId: panelId,
+      });
+      if (!shaft || holes.length === 0) {
+        setAlignmentNotice(lang === "zh"
+          ? "孔轴对齐失败：所选层板没有可用穿孔"
+          : "SHAFT ALIGNMENT FAILED: THE PANEL HAS NO AVAILABLE HOLES");
+        return;
+      }
+      const shaftStart = new THREE.Vector3(...shaft.start);
+      const shaftEnd = new THREE.Vector3(...shaft.end);
+      const shaftCenter = shaftStart.clone().add(shaftEnd).multiplyScalar(0.5);
+      const shaftAxis = shaftEnd.clone().sub(shaftStart).normalize();
+      const shaftLength = shaftStart.distanceTo(shaftEnd);
+      const snap = findBestShaftPanelHoleSnap({
+        shaftId,
+        proposedPosition: shaftCenter.toArray() as Vec3Tuple,
+        proposedRotation: [0, 0, 0],
+        localAxis: shaftAxis.toArray() as Vec3Tuple,
+        shaftDiameterMm: shaft.diameter,
+        shaftLength,
+        holes,
+        maxDistanceMm: 10000,
+        axisToleranceDeg: 7.5,
+      });
+      if (!snap) {
+        setAlignmentNotice(lang === "zh"
+          ? "孔轴对齐失败：当前方向没有孔径兼容且轴向平行的孔，系统不会自动旋转组件"
+          : "SHAFT ALIGNMENT FAILED: NO PARALLEL, DIAMETER-COMPATIBLE HOLE IN THE CURRENT POSE");
+        return;
+      }
+      recordHistory("align");
+      if (movingId === shaftId) {
+        const shaftTransform = getPartTransform(transforms, shaftId);
+        setTransforms((current) => ({
+          ...current,
+          [shaftId]: transformAtWorldPoint(shaftId, snap.position, dimensions, addedParts, shaftTransform),
+        }));
+      } else {
+        const panelTransform = getPartTransform(transforms, panelId);
+        const shaftTranslation = new THREE.Vector3(...snap.position).sub(shaftCenter);
+        const panelTarget = new THREE.Vector3(...getPartWorldPosition(panelId, dimensions, addedParts, transforms))
+          .sub(shaftTranslation)
+          .toArray() as Vec3Tuple;
+        setTransforms((current) => ({
+          ...current,
+          [panelId]: transformAtWorldPoint(panelId, panelTarget, dimensions, addedParts, panelTransform),
+        }));
+      }
+      setAssemblyConnections((current) => [
+        ...current.filter((connection) =>
+          connection.connectorId !== movingId && connection.shaftId !== movingId,
+        ),
+        ...snap.connections,
+      ]);
+      setPreciseAssemblyRelations((current) => snap.connections.reduce((relations, connection) =>
+        replacePairRelation(relations, createShaftBoreRelation({
+          id: `REL-SHAFT-${connection.connectorId}-${connection.portId}-${connection.shaftId}`,
+          fixedPartId: anchorId,
+          movingPartId: movingId,
+          connectorId: connection.connectorId,
+          portId: connection.portId,
+          shaftId: connection.shaftId,
+          axialReference: "preserve",
+          axialOffsetMm: Math.round(connection.positionOnShaft * shaftLength / mmToScene(1) * 10) / 10,
+        })), current));
+      setAlignmentNotice(lang === "zh"
+        ? `已保持 ${anchorId} 不动，使 ${movingId} 与 ${snap.connections.length} 个共线孔同轴`
+        : `KEPT ${anchorId} FIXED · ${movingId} ALIGNED WITH ${snap.connections.length} COLLINEAR HOLE${snap.connections.length === 1 ? "" : "S"}`);
+      return;
+    }
     if (!selectedPairShaft || !selectedPairConnector) {
-      setAlignmentNotice(lang === "zh" ? "请选择一根光轴和一个连接件，或两个连接件" : "SELECT A SHAFT AND CONNECTOR, OR TWO CONNECTORS");
+      setAlignmentNotice(lang === "zh" ? "请选择光轴与连接件/层板，或两个连接件" : "SELECT A SHAFT AND CONNECTOR/PANEL, OR TWO CONNECTORS");
       return;
     }
     const shaftId = selectedPairShaft.id;
@@ -9291,6 +9816,30 @@ export function App() {
       ),
       ...snap.connections,
     ]);
+    setPreciseAssemblyRelations((current) => {
+      const invalidated = current.map((relation) =>
+        relation.fixedPartId === movingId || relation.movingPartId === movingId
+          ? {
+              ...relation,
+              status: "invalid" as const,
+              message: lang === "zh" ? "组件位置已改变，需要重新求解" : "PART MOVED; RELATION REQUIRES RESOLVE",
+            }
+          : relation);
+      return snap.connections.reduce((relations, connection, index) => replacePairRelation(
+        relations,
+        createShaftBoreRelation({
+          id: `REL-SHAFT-${connection.connectorId}-${connection.portId}-${connection.shaftId}`,
+          fixedPartId: anchorId,
+          movingPartId: movingId,
+          connectorId: connection.connectorId,
+          portId: connection.portId,
+          shaftId: connection.shaftId,
+          residualMm: 0,
+          axialReference: "preserve",
+          axialOffsetMm: Math.round(connection.positionOnShaft * 1000) / 10,
+        }),
+      ), invalidated);
+    });
     setAlignmentNotice(lang === "zh"
       ? `已保持 ${anchorId} 不动，并调整 ${movingId}，建立 ${snap.connections.length} 个连接`
       : `KEPT ${anchorId} FIXED AND ADJUSTED ${movingId} · ${snap.connections.length} CONNECTIONS`);
@@ -9333,6 +9882,122 @@ export function App() {
       ...current,
       ...Object.fromEntries(selectedIds.map((id) => [id, material])),
     }));
+  };
+  const removePreciseAssemblyRelation = (relationId: string) => {
+    if (!preciseAssemblyRelations.some(({ id }) => id === relationId)) return;
+    recordHistory("edit");
+    setPreciseAssemblyRelations((current) => current.filter(({ id }) => id !== relationId));
+    setAlignmentNotice(lang === "zh" ? "装配关系已解除" : "ASSEMBLY RELATION REMOVED");
+  };
+  const updatePreciseAssemblyRelation = (
+    relationId: string,
+    patch: Partial<Pick<PreciseAssemblyRelation, "gapMm" | "axialReference" | "axialOffsetMm">>,
+  ) => {
+    const relation = preciseAssemblyRelations.find(({ id }) => id === relationId);
+    if (!relation) return;
+    if (relation.type !== "shaft-bore") {
+      const nextGap = Math.max(0, patch.gapMm ?? relation.gapMm ?? 0);
+      const fixed = buildPreciseBoxPart({ id: relation.fixedPartId, dimensions, addedParts, transforms });
+      const moving = buildPreciseBoxPart({ id: relation.movingPartId, dimensions, addedParts, transforms });
+      if (!fixed || !moving) return;
+      const solved = solveSurfaceRelation({
+        fixed,
+        moving,
+        gapMm: nextGap,
+        fixedFeatureId: relation.fixedFeatureId,
+        movingFeatureId: relation.movingFeatureId,
+      });
+      if (!solved.ok) {
+        setAlignmentNotice(preciseRelationFailureMessage(solved.reason, lang));
+        return;
+      }
+      recordHistory("change-parameter");
+      const movingTransform = getPartTransform(transforms, relation.movingPartId);
+      setTransforms((current) => ({
+        ...current,
+        [relation.movingPartId]: transformAtWorldPoint(
+          relation.movingPartId,
+          addVec3(moving.center, solved.candidate.translation),
+          dimensions,
+          addedParts,
+          movingTransform,
+        ),
+      }));
+      setPreciseAssemblyRelations((current) => current.map((candidate) => candidate.id === relationId
+        ? {
+            ...candidate,
+            type: nextGap === 0 ? "surface-contact" : "surface-gap",
+            gapMm: nextGap,
+            status: "valid",
+            residualMm: 0,
+            message: undefined,
+          }
+        : candidate));
+      return;
+    }
+
+    const endpointKinds = [relation.fixedPartId, relation.movingPartId].map((id) => ({
+      id,
+      kind: getPartInfo(id, lang, resolvedRiskIds, addedParts).kind,
+    }));
+    const shaftId = endpointKinds.find(({ kind }) => kind === "rod")?.id;
+    const connectorId = endpointKinds.find(({ kind }) => kind !== "rod")?.id;
+    const portId = relation.fixedFeatureId === "shaft-axis" ? relation.movingFeatureId : relation.fixedFeatureId;
+    const connection = assemblyConnections.find((candidate) =>
+      candidate.shaftId === shaftId && candidate.connectorId === connectorId && candidate.portId === portId);
+    const shaft = shaftId
+      ? buildVisibleShaftSegments({ dimensions, addedParts, transforms, deletedIds, hiddenIds, isolatedIds })
+          .find(({ partId }) => partId === shaftId)
+      : null;
+    if (!shaftId || !connectorId || !connection || !shaft) {
+      setAlignmentNotice(lang === "zh" ? "无法更新轴向位置：原孔轴连接已失效" : "CANNOT UPDATE AXIAL POSITION: SHAFT-BORE LINK IS INVALID");
+      return;
+    }
+    const reference = patch.axialReference ?? relation.axialReference ?? "preserve";
+    const offsetMm = Math.max(0, patch.axialOffsetMm ?? relation.axialOffsetMm ?? 0);
+    const shaftStart = new THREE.Vector3(...shaft.start);
+    const shaftEnd = new THREE.Vector3(...shaft.end);
+    const shaftVector = shaftEnd.clone().sub(shaftStart);
+    const shaftLengthScene = shaftVector.length();
+    const shaftLengthMm = shaftLengthScene / mmToScene(1);
+    const desiredT = reference === "shaft-center"
+      ? 0.5
+      : reference === "shaft-start"
+        ? THREE.MathUtils.clamp(offsetMm / Math.max(shaftLengthMm, 0.1), 0, 1)
+        : reference === "shaft-end"
+          ? THREE.MathUtils.clamp(1 - offsetMm / Math.max(shaftLengthMm, 0.1), 0, 1)
+          : connection.positionOnShaft;
+    const deltaScene = (desiredT - connection.positionOnShaft) * shaftLengthScene;
+    const shaftAxis = shaftVector.normalize();
+    const movingDirection = relation.movingPartId === shaftId ? -deltaScene : deltaScene;
+    const movingWorld = new THREE.Vector3(...getPartWorldPosition(relation.movingPartId, dimensions, addedParts, transforms))
+      .addScaledVector(shaftAxis, movingDirection)
+      .toArray() as Vec3Tuple;
+    const movingTransform = getPartTransform(transforms, relation.movingPartId);
+    recordHistory("change-parameter");
+    setTransforms((current) => ({
+      ...current,
+      [relation.movingPartId]: transformAtWorldPoint(
+        relation.movingPartId,
+        movingWorld,
+        dimensions,
+        addedParts,
+        movingTransform,
+      ),
+    }));
+    setAssemblyConnections((current) => current.map((candidate) => candidate === connection
+      ? { ...candidate, positionOnShaft: desiredT }
+      : candidate));
+    setPreciseAssemblyRelations((current) => current.map((candidate) => candidate.id === relationId
+      ? {
+          ...candidate,
+          axialReference: reference,
+          axialOffsetMm: offsetMm,
+          status: "valid",
+          residualMm: 0,
+          message: undefined,
+        }
+      : candidate));
   };
   const addSelectedPanelCutout = () => {
     if (!canDrillSelectedPanel) return;
@@ -9698,11 +10363,13 @@ export function App() {
     const duplicateTransforms: Record<string, PartTransform> = {};
     const duplicateMaterials: Record<string, PartMaterial> = {};
     const duplicatePanelCutouts: Record<string, PanelCutout[]> = {};
+    const duplicatePartIdMap: Record<string, string> = {};
     selectedIds.forEach((sourceId) => {
       const sourceAddedPart = addedParts.find((part) => part.id === sourceId);
       const kind = getPartInfo(sourceId, lang, resolvedRiskIds, addedParts).kind;
       const id = nextPartId(kind, workingIds);
       workingIds.push(id);
+      duplicatePartIdMap[sourceId] = id;
       const duplicate = { id, kind, libraryPart: sourceAddedPart?.libraryPart } satisfies AddedPart;
       duplicates.push(duplicate);
       const sourceTransform = getPartTransform(transforms, sourceId);
@@ -9715,6 +10382,14 @@ export function App() {
     setTransforms((current) => ({ ...current, ...duplicateTransforms }));
     setMaterials((current) => ({ ...current, ...duplicateMaterials }));
     setPanelCutouts((current) => ({ ...current, ...duplicatePanelCutouts }));
+    setPreciseAssemblyRelations((current) => [
+      ...current,
+      ...copyPreciseRelationsForPartMap(
+        current,
+        duplicatePartIdMap,
+        (sourceId) => `${sourceId}-copy-${Date.now()}`,
+      ),
+    ]);
     const duplicateIds = duplicates.map(({ id }) => id);
     if (activeUserGroup && duplicateIds.length >= 2) {
       setUserGroups((current) => [...current, {
@@ -9735,11 +10410,13 @@ export function App() {
     const duplicateTransforms: Record<string, PartTransform> = {};
     const duplicateMaterials: Record<string, PartMaterial> = {};
     const duplicatePanelCutouts: Record<string, PanelCutout[]> = {};
+    const duplicatePartIdMap: Record<string, string> = {};
     selectedIds.forEach((sourceId) => {
       const sourceAddedPart = addedParts.find((part) => part.id === sourceId);
       const kind = getPartInfo(sourceId, lang, resolvedRiskIds, addedParts).kind;
       const id = nextPartId(kind, workingIds);
       workingIds.push(id);
+      duplicatePartIdMap[sourceId] = id;
       const duplicate = { id, kind, libraryPart: sourceAddedPart?.libraryPart } satisfies AddedPart;
       duplicates.push(duplicate);
       workingAddedParts.push(duplicate);
@@ -9754,6 +10431,14 @@ export function App() {
     setTransforms((current) => ({ ...current, ...duplicateTransforms }));
     setMaterials((current) => ({ ...current, ...duplicateMaterials }));
     setPanelCutouts((current) => ({ ...current, ...duplicatePanelCutouts }));
+    setPreciseAssemblyRelations((current) => [
+      ...current,
+      ...copyPreciseRelationsForPartMap(
+        current,
+        duplicatePartIdMap,
+        (sourceId) => `${sourceId}-mirror-${Date.now()}`,
+      ),
+    ]);
     const duplicateIds = duplicates.map(({ id }) => id);
     if (activeUserGroup && duplicateIds.length >= 2) {
       setUserGroups((current) => [...current, {
@@ -9865,6 +10550,9 @@ export function App() {
     setIsolatedIds((current) => new Set([...current].filter((id) => !idSet.has(id))));
     setAssemblyConnections((current) => current.filter((connection) =>
       !idSet.has(connection.connectorId) && !idSet.has(connection.shaftId),
+    ));
+    setPreciseAssemblyRelations((current) => current.filter((relation) =>
+      !idSet.has(relation.fixedPartId) && !idSet.has(relation.movingPartId),
     ));
     setPanelCutouts((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !idSet.has(id))));
     setPendingDeleteIds([]);
@@ -10139,6 +10827,7 @@ export function App() {
             lockedIds={lockedIds}
             isolatedIds={isolatedIds}
             assemblyConnections={assemblyConnections}
+            preciseAssemblyRelations={preciseAssemblyRelations}
             focusRequest={focusRequest}
             onSelect={selectPart}
             onSelectMany={selectMany}
@@ -10153,6 +10842,10 @@ export function App() {
             onAlignPair={alignSelectedPair}
             onConnectPair={smartConnectSelectedPair}
             canConnectPair={canConnectSelectedPair}
+            onSurfaceContact={() => setSelectedPairSurfaceGap(0)}
+            onSurfaceGap={setSelectedPairSurfaceGap}
+            canSurfacePair={canSurfaceSelectedPair}
+            onExchangePair={exchangeSelectedPair}
             onMirrorSelection={mirrorSelection}
             onFlipSelection={flipSelection}
             onRotateSelection={rotateSelection}
@@ -10230,6 +10923,7 @@ export function App() {
                   overallDimensions={displayedDimensions}
                   structuralAnalysis={structuralAnalysis}
                   structuralIssues={selectedStructuralIssues}
+                  preciseRelations={selectedPreciseRelations}
                   mixedKinds={new Set(selectedIds.map((id) => getPartInfo(id, lang, resolvedRiskIds, addedParts).kind)).size > 1}
                   transform={selectedTransform}
                   shaftLength={selected.kind === "rod" ? selectedRodLength : undefined}
@@ -10257,6 +10951,8 @@ export function App() {
                   onQuickFix={() => quickFixPart(selectedId)}
                   onQuickRotate={rotateSelection}
                   onLocateBom={() => { setBomFocusIds(selectedIds); setActivePage("bom"); }}
+                  onRemovePreciseRelation={removePreciseAssemblyRelation}
+                  onUpdatePreciseRelation={updatePreciseAssemblyRelation}
                   collapsed={false}
                   onToggleCollapsed={() => undefined}
                   lang={lang}

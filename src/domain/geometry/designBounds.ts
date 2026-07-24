@@ -92,7 +92,7 @@ export function mergeDesignBounds(
   const merged = boxes.reduce((result, box) => result.union(box), new THREE.Box3());
   const center = merged.getCenter(new THREE.Vector3());
   const size = merged.getSize(new THREE.Vector3());
-  const toMm = (value: number) => Math.max(0, Math.round(value / sceneUnitsPerMm));
+  const toMm = (value: number) => Math.max(0, Math.round(value / sceneUnitsPerMm * 10) / 10);
   return {
     min: merged.min.toArray() as BoundsVector,
     max: merged.max.toArray() as BoundsVector,
