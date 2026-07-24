@@ -4910,7 +4910,19 @@ function ShaftLengthHandles({
   const currentLengthScene = baseLengthScene * Math.max(0.15, transform.sizeX / 100);
   const startPosition = axis.clone().multiplyScalar(-currentLengthScene / 2);
   const endPosition = axis.clone().multiplyScalar(currentLengthScene / 2);
-  const handleRadius = THREE.MathUtils.clamp(radius * 2.8, 0.09, 0.16);
+  const endpointFaceQuaternion = useMemo(
+    () => new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), axis),
+    [axis],
+  );
+  const endpointHitQuaternion = useMemo(
+    () => new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis),
+    [axis],
+  );
+  const hitRadius = THREE.MathUtils.clamp(radius * 1.65, 0.065, 0.11);
+  const hitDepth = THREE.MathUtils.clamp(radius * 0.9, 0.035, 0.07);
+  const ringThickness = THREE.MathUtils.clamp(radius * 0.12, 0.004, 0.012);
+  const ringInnerRadius = Math.max(radius - ringThickness, radius * 0.72);
+  const faceOffset = Math.min(0.006, radius * 0.12);
 
   const publishHandlePositions = useCallback(() => {
     const publish = (mesh: THREE.Mesh | null) => {
@@ -4926,6 +4938,10 @@ function ShaftLengthHandles({
     gl.domElement.dataset.shaftLengthStart = publish(startRef.current);
     gl.domElement.dataset.shaftLengthEnd = publish(endRef.current);
     gl.domElement.dataset.shaftLengthMm = String(Math.round(baseLengthScene / mmToScene(1) * transform.sizeX / 100));
+    gl.domElement.dataset.shaftEndpointHandleShape = "circular-face";
+    gl.domElement.dataset.shaftEndpointFaceDiameterMm = String(
+      Math.round(radius * 2 / mmToScene(1) * 10) / 10,
+    );
   }, [
     baseLengthScene,
     camera,
@@ -4933,6 +4949,7 @@ function ShaftLengthHandles({
     id,
     size.height,
     size.width,
+    radius,
     transform.rotX,
     transform.rotY,
     transform.rotZ,
@@ -4958,6 +4975,8 @@ function ShaftLengthHandles({
     delete gl.domElement.dataset.shaftLengthStart;
     delete gl.domElement.dataset.shaftLengthEnd;
     delete gl.domElement.dataset.shaftLengthMm;
+    delete gl.domElement.dataset.shaftEndpointHandleShape;
+    delete gl.domElement.dataset.shaftEndpointFaceDiameterMm;
   }, [controls, gl.domElement]);
 
   const beginDrag = (endpoint: "start" | "end", event: ThreeEvent<PointerEvent>) => {
@@ -5027,31 +5046,61 @@ function ShaftLengthHandles({
     invalidate();
   };
 
-  const handle = (endpoint: "start" | "end", position: THREE.Vector3, ref: React.RefObject<THREE.Mesh | null>) => (
-    <mesh
-      ref={ref}
-      position={position}
-      renderOrder={20}
-      onPointerDown={(event) => beginDrag(endpoint, event)}
-      onPointerMove={dragEndpoint}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onPointerOver={() => { gl.domElement.style.cursor = "ew-resize"; }}
-      onPointerOut={() => {
-        if (!dragging.current) gl.domElement.style.cursor = "";
-      }}
-    >
-      <sphereGeometry args={[handleRadius, 24, 24]} />
-      <meshBasicMaterial color="#39e66d" depthTest={false} transparent opacity={0.96} />
-    </mesh>
-  );
+  const handle = (endpoint: "start" | "end", position: THREE.Vector3, ref: React.RefObject<THREE.Mesh | null>) => {
+    const outwardDirection = endpoint === "start" ? -1 : 1;
+    const visualOffset = axis.clone().multiplyScalar(faceOffset * outwardDirection);
+    return (
+      <group position={position}>
+        <mesh
+          ref={ref}
+          quaternion={endpointHitQuaternion}
+          renderOrder={20}
+          onPointerDown={(event) => beginDrag(endpoint, event)}
+          onPointerMove={dragEndpoint}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onPointerOver={() => { gl.domElement.style.cursor = "ew-resize"; }}
+          onPointerOut={() => {
+            if (!dragging.current) gl.domElement.style.cursor = "";
+          }}
+        >
+          <cylinderGeometry args={[hitRadius, hitRadius, hitDepth, 24]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} colorWrite={false} />
+        </mesh>
+        <group position={visualOffset} quaternion={endpointFaceQuaternion}>
+          <mesh renderOrder={21} raycast={() => null}>
+            <circleGeometry args={[radius, 40]} />
+            <meshBasicMaterial
+              color="#39e66d"
+              depthTest={false}
+              depthWrite={false}
+              side={THREE.DoubleSide}
+              transparent
+              opacity={0.2}
+            />
+          </mesh>
+          <mesh renderOrder={22} raycast={() => null}>
+            <ringGeometry args={[ringInnerRadius, radius, 40]} />
+            <meshBasicMaterial
+              color="#39e66d"
+              depthTest={false}
+              depthWrite={false}
+              side={THREE.DoubleSide}
+              transparent
+              opacity={0.96}
+            />
+          </mesh>
+        </group>
+      </group>
+    );
+  };
 
   return (
     <>
       <Line
         points={[startPosition.toArray() as Vec3Tuple, endPosition.toArray() as Vec3Tuple]}
         color="#39e66d"
-        lineWidth={1.6}
+        lineWidth={1}
         transparent
         opacity={0.68}
         depthTest={false}
