@@ -1546,7 +1546,6 @@ const rawComponentGeometries = {
   verticalFixedBase: { primitives: defaultVerticalFixedBaseDefinition.primitives, ports: defaultVerticalFixedBaseDefinition.ports },
   shaftSupport: { primitives: [{ shape: "box", size: [1.8, 0.28, 1.25], position: [0, -0.62, 0] }, { shape: "box", size: [1.05, 1.25, 0.78], position: [0, 0, 0] }, { shape: "cylinder", size: [0.42, 1.4, 0.42], position: [0, 0.12, 0], rotation: [90, 0, 0] }], ports: [{ id: "SHAFT", axis: "z", position: [0, 0.12, 0], diameter: 10 }, { id: "MOUNT", axis: "y", position: [0, -0.76, 0], diameter: 0 }] },
   linearBushing: { primitives: [{ shape: "cylinder", size: [0.9, 1.8, 0.9], position: [0, 0, 0], rotation: [90, 0, 0] }, { shape: "cylinder", size: [0.38, 2, 0.38], position: [0, 0, 0], rotation: [90, 0, 0] }], ports: [{ id: "SLIDE", axis: "z", position: [0, 0, 0], diameter: 10 }] },
-  shaftCollar: { primitives: [{ shape: "cylinder", size: [1.5, 0.5, 1.5], position: [0, 0, 0], rotation: [90, 0, 0] }, { shape: "box", size: [0.48, 0.42, 0.34], position: [0, 0.58, 0] }], ports: [{ id: "SHAFT", axis: "z", position: [0, 0, 0], diameter: 10 }] },
   fixedRing: { primitives: defaultShaftStopDefinition.primitives, ports: defaultShaftStopDefinition.ports },
 } satisfies Record<string, RawComponentGeometry>;
 
@@ -1564,7 +1563,7 @@ function upgradeComponentPort(geometryId: string, port: RawComponentGeometry["po
           : "support";
   const behavior: PortBehavior = id.includes("SLIDE") || geometryId === "linearBushing"
     ? "slide"
-    : ["shaftCollar", "fixedRing"].includes(geometryId)
+    : geometryId === "fixedRing"
       ? "stop"
       : "fixed";
   return {
@@ -1710,7 +1709,6 @@ const initialLibraryParts: LibraryPart[] = [
   { id: "lib-sk10", model: defaultVerticalFixedBaseVariant.model, name: "立式固定座", kind: "joint", status: "ready", material: "不锈钢", dimensions: { width: 42, length: 14, height: 32.8 }, verticalFixedBaseShaftDiameter: defaultVerticalFixedBaseVariant.shaftDiameter, variantCount: verticalFixedBaseVariants.length, compatibleRod: `Ø${defaultVerticalFixedBaseVariant.shaftDiameter} mm`, connector: `夹紧支撑 / 2 × Ø${defaultVerticalFixedBaseVariant.s} 底面安装 / 孔距 ${defaultVerticalFixedBaseVariant.b} mm`, usageTags: ["panel-support", "base-foot"], source: "three-view", updatedAt: "2026-07-22", geometry: componentGeometries.verticalFixedBase, referenceLabel: "用户提供结构图及 SK8–SK16 五组尺寸表", referenceUrl: "/assets/references/vertical-fixed-base/size-table.png" },
   { id: "lib-shf10", model: "SHF10", name: "法兰式光轴支座", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 43, length: 10, height: 24 }, compatibleRod: "Ø10 mm", connector: "夹紧支撑 / 法兰安装", usageTags: ["wall-mount", "panel-support"], source: "manual", updatedAt: "2026-07-12", geometry: componentGeometries.shaftSupport, referenceLabel: "Tuli SHF10 STEP", referenceUrl: "https://www.tuli-shop.com/linear-shaft-support-shf-10", modelAssetUrl: "/assets/components/shaft-supports/SHF10/SHF10.glb", modelAssetName: "SHF10.step" },
   { id: "lib-lm10", model: "LM10", name: "直筒型直线轴承", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 19, length: 29, height: 19 }, compatibleRod: "Ø10 mm", connector: "轴向滑动", usageTags: ["linear-motion"], source: "manual", updatedAt: "2026-07-12", geometry: componentGeometries.linearBushing, referenceLabel: "THK Linear Bushing LM", referenceUrl: "https://www.thk.com/eu/en/products/other_linear_motion_guides/linear_bushing/flange_less_type/lm_aj_op/" },
-  { id: "lib-collar10", model: "NSCSS-10-10-S", name: "分体式轴环", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 30, length: 10, height: 30 }, compatibleRod: "Ø10 mm", connector: "轴向限位 / 分体夹紧", usageTags: ["axial-stop"], source: "manual", updatedAt: "2026-07-12", geometry: componentGeometries.shaftCollar, referenceLabel: "NBK Split-type Set Collar", referenceUrl: "https://www.nbk1560.com/en-US/products/machine_element/setcollar/NSCSS-S/NSCSS-10-10-S/" },
   { id: "lib-fixed-ring-10", model: shaftStopModel(defaultShaftStopParameters), name: "限位器", kind: "joint", status: "ready", material: "不锈钢", dimensions: { width: 30, length: 30, height: 10 }, parameters: defaultShaftStopParameters, variantCount: shaftStopVariants.length, compatibleRod: "Ø10 mm", connector: "轴向限位 / 开口锁紧 / M4", usageTags: ["axial-stop"], source: "three-view", updatedAt: "2026-07-22", geometry: componentGeometries.fixedRing, referenceLabel: "用户提供结构图及 18 个库存尺寸组合", referenceUrl: "/assets/references/shaft-stop/size-table.png" },
 ];
 
