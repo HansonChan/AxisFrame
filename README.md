@@ -68,4 +68,4 @@ AxisFrame 当前把项目数据保存在浏览器本地存储中。清除站点�
 
 ## 许可证
 
-本项目采用 [Apache License 2.0](LICENSE)。
+本项目采用 [MIT License](LICENSE)。

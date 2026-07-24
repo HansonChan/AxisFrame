@@ -70,4 +70,4 @@ AxisFrame currently stores projects in the browser's local storage. Export a pro
 
 ## License
 
-AxisFrame is licensed under the [Apache License 2.0](LICENSE).
+AxisFrame is licensed under the [MIT License](LICENSE).
