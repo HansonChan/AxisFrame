@@ -1,0 +1,26 @@
+{
+  "schema": "axisframe-sample-project-manifest",
+  "schemaVersion": 1,
+  "backup": "AxisFrame_projects_20260724.json",
+  "backupSchemaVersion": 2,
+  "exportedAt": "2026-07-24T10:25:57.810Z",
+  "sha256": "8432a89f56d4710eafe4e5287fe8cef169df4ae41b8aaa62547ea98efcc95596",
+  "projects": [
+    {
+      "id": "project-1784709260529",
+      "name": "单层置物架"
+    },
+    {
+      "id": "project-1784879755949",
+      "name": "双层置物架"
+    },
+    {
+      "id": "project-1784776783692",
+      "name": "洞洞板支架"
+    },
+    {
+      "id": "project-1784804315711",
+      "name": "手办架"
+    }
+  ]
+}

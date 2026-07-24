@@ -2698,7 +2698,7 @@ button {
 .tree-node {
   position: relative;
   display: grid;
-  min-height: 34px;
+  min-height: 44px;
   grid-template-columns: 16px 48px minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
@@ -2763,7 +2763,8 @@ button {
 }
 
 .tree-node-id,
-.tree-node-name {
+.tree-node-name,
+.tree-node-spec {
   overflow: hidden;
   font-size: 10px;
   font-weight: 800;
@@ -2778,6 +2779,25 @@ button {
 
 .tree-node-name {
   color: inherit;
+}
+
+.tree-node-details {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.tree-node-spec {
+  color: var(--dim);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.015em;
+}
+
+.tree-node:hover .tree-node-spec,
+.tree-node.selected .tree-node-spec {
+  color: var(--muted);
 }
 
 .tree-empty {
@@ -4262,6 +4282,29 @@ button.dimension-label:focus-visible {
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.72),
     inset 0 -8px 16px rgba(72, 145, 170, 0.24);
+}
+
+.material-acrylicOrange,
+.material-acrylicKleinBlue,
+.material-acrylicGreen {
+  background:
+    radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0) 24%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.46), var(--acrylic-swatch) 42%, color-mix(in srgb, var(--acrylic-swatch), #ffffff 28%));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.58),
+    inset 0 -8px 16px color-mix(in srgb, var(--acrylic-swatch), #000000 28%);
+}
+
+.material-acrylicOrange {
+  --acrylic-swatch: #ff7518;
+}
+
+.material-acrylicKleinBlue {
+  --acrylic-swatch: #002fa7;
+}
+
+.material-acrylicGreen {
+  --acrylic-swatch: #159b62;
 }
 
 .material-stainless {
@@ -5971,6 +6014,105 @@ button.dimension-label:focus-visible {
 .structural-metrics dd span {
   color: var(--dim);
   font-size: 7px;
+}
+
+.structural-material-mass {
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--line);
+  padding: 10px;
+  background: var(--panel-3);
+}
+
+.structural-material-mass > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.structural-material-mass > header > span {
+  color: var(--dim);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.11em;
+}
+
+.structural-material-mass > header > strong {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.structural-material-mass > header small,
+.structural-material-mass dd span {
+  color: var(--dim);
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.structural-material-mass dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.structural-material-mass dl > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.structural-material-mass dt,
+.structural-material-mass dd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.structural-material-mass dd {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: var(--text);
+}
+
+.structural-material-dot {
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 50%;
+  background: #949b9f;
+}
+
+.structural-material-dot-wood {
+  background: #a87d4f;
+}
+
+.structural-material-dot-acrylic {
+  background: #47b9d6;
+}
+
+.structural-material-mass > p {
+  margin: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  color: var(--dim);
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.structural-material-mass.compact {
+  padding: 9px;
+}
+
+.structural-material-mass.compact > header > strong {
+  font-size: 14px;
 }
 
 .structural-issue-list {

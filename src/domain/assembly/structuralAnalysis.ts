@@ -3,6 +3,21 @@ import type { AssemblyConnection, Vec3 } from "./assembly";
 export type StructuralPartKind = "joint" | "rod" | "panel";
 export type StructuralMaterial = "steel" | "wood" | "acrylic";
 export type StructuralSeverity = "error" | "warning";
+export const STRUCTURAL_MATERIAL_SPECS: Record<StructuralMaterial, {
+  densityKgPerM3: number;
+  labelZh: string;
+  labelEn: string;
+}> = {
+  // AISI 304 stainless steel: 7.9 kg/dm³.
+  // https://otke-cdn.outokumpu.com/-/media/files/products/core/outokumpu-core-range-datasheet.pdf
+  steel: { densityKgPerM3: 7_900, labelZh: "304 不锈钢", labelEn: "304 STAINLESS STEEL" },
+  // Generic marine plywood assumption: midpoint of the published 580–620 kg/m³ range.
+  // https://www.devonhardwoods.co.uk/products/sheet-materials/marine-plywood/
+  wood: { densityKgPerM3: 600, labelZh: "普通海洋板", labelEn: "MARINE PLYWOOD" },
+  // PLEXIGLAS PMMA: 1.19 g/cm³.
+  // https://www.plexiglas.de/files/plexiglas-content/pdf/technische-informationen/234-32-EN-environmental-product-declaration-PLEXIGLAS-multi-skin-sheets.pdf
+  acrylic: { densityKgPerM3: 1_190, labelZh: "亚克力", labelEn: "ACRYLIC" },
+};
 export type StructuralIssueCode =
   | "NO_GROUND_CONTACT"
   | "CONNECTOR_INCOMPLETE"
@@ -20,6 +35,7 @@ export type StructuralPart = {
   maxMm: Vec3;
   sizeMm: Vec3;
   massKg: number;
+  material?: StructuralMaterial;
   requiredConnectionCount?: number;
 };
 
@@ -50,6 +66,7 @@ export type StructuralAnalysis = {
   errorCount: number;
   warningCount: number;
   totalMassKg: number;
+  massByMaterialKg: Record<StructuralMaterial, number>;
   centerOfMassMm: Vec3 | null;
   supportFootprint: SupportFootprint | null;
   groundedPartIds: string[];
@@ -127,7 +144,7 @@ export function estimatePartMassKg({
   sizeMm: Vec3;
   material?: StructuralMaterial;
 }) {
-  const densityKgPerM3 = material === "steel" ? 7_850 : material === "acrylic" ? 1_180 : 650;
+  const densityKgPerM3 = STRUCTURAL_MATERIAL_SPECS[material].densityKgPerM3;
   const [width, height, depth] = sizeMm.map((value) => Math.max(0, value));
   let volumeMm3 = width * height * depth;
   if (kind === "rod") {
@@ -260,7 +277,12 @@ export function analyzeStructure({
     });
   });
 
-  const totalMassKg = parts.reduce((sum, part) => sum + part.massKg, 0);
+  const massByMaterialKg = parts.reduce<Record<StructuralMaterial, number>>((totals, part) => {
+    const material = part.material ?? (part.kind === "panel" ? "wood" : "steel");
+    totals[material] += part.massKg;
+    return totals;
+  }, { steel: 0, wood: 0, acrylic: 0 });
+  const totalMassKg = Object.values(massByMaterialKg).reduce((sum, massKg) => sum + massKg, 0);
   const centerOfMassMm: Vec3 | null = totalMassKg > 0
     ? [0, 1, 2].map((axis) => parts.reduce((sum, part) => sum + part.centerMm[axis] * part.massKg, 0) / totalMassKg) as Vec3
     : null;
@@ -308,6 +330,9 @@ export function analyzeStructure({
     errorCount: issues.filter(({ severity }) => severity === "error").length,
     warningCount: issues.filter(({ severity }) => severity === "warning").length,
     totalMassKg: round(totalMassKg, 2),
+    massByMaterialKg: Object.fromEntries(
+      Object.entries(massByMaterialKg).map(([material, massKg]) => [material, round(massKg, 2)]),
+    ) as Record<StructuralMaterial, number>,
     centerOfMassMm: centerOfMassMm?.map((value) => round(value, 1)) as Vec3 | null,
     supportFootprint,
     groundedPartIds,

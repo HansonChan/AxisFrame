@@ -1,3 +1,5 @@
+import type { AcrylicPanelMaterial } from "./panelMaterials";
+
 export const acrylicLiquidGlassMaterial = {
   color: "#e8f6f8",
   attenuationColor: "#d8f8ff",
@@ -15,3 +17,25 @@ export const acrylicLiquidGlassMaterial = {
   envMapIntensity: 1.65,
   attenuationDistance: 0.75,
 } as const;
+
+export const acrylicPanelColorSpecs: Record<AcrylicPanelMaterial, {
+  color: string;
+  attenuationColor: string;
+}> = {
+  acrylic: {
+    color: acrylicLiquidGlassMaterial.color,
+    attenuationColor: acrylicLiquidGlassMaterial.attenuationColor,
+  },
+  acrylicOrange: {
+    color: "#ff7518",
+    attenuationColor: "#ff8a32",
+  },
+  acrylicKleinBlue: {
+    color: "#002fa7",
+    attenuationColor: "#1549c7",
+  },
+  acrylicGreen: {
+    color: "#159b62",
+    attenuationColor: "#27b878",
+  },
+};

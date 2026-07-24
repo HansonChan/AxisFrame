@@ -17,7 +17,7 @@ import {
   type PreciseAssemblyRelation,
 } from "../domain/assembly/preciseRelations";
 import { planSmartRackAlignment, type SmartAlignAxis, type SmartAlignPart } from "../domain/assembly/smartRackAlignment";
-import { analyzeStructure, estimatePartMassKg, type PanelMountConnection, type StructuralAnalysis, type StructuralIssue, type StructuralPart } from "../domain/assembly/structuralAnalysis";
+import { analyzeStructure, estimatePartMassKg, STRUCTURAL_MATERIAL_SPECS, type PanelMountConnection, type StructuralAnalysis, type StructuralIssue, type StructuralMaterial, type StructuralPart } from "../domain/assembly/structuralAnalysis";
 import { componentSceneSize, mmToScene, normalizedComponentSelectionSize } from "../domain/components/componentBounds";
 import { getCachedHollowComponentGeometry, hasBooleanCutouts } from "../domain/components/componentBooleanGeometry";
 import { resolveShaftInstanceParameters } from "../domain/components/shaftInstance";
@@ -115,8 +115,8 @@ import {
   type BoundsTransform,
   type OverallDesignBounds,
 } from "../domain/geometry/designBounds";
-import { acrylicLiquidGlassMaterial } from "../domain/components/acrylicMaterial";
-import { inferPanelMaterial, panelMaterialCatalogLabel, type PanelMaterial } from "../domain/components/panelMaterials";
+import { acrylicLiquidGlassMaterial, acrylicPanelColorSpecs } from "../domain/components/acrylicMaterial";
+import { inferPanelMaterial, isAcrylicPanelMaterial, panelMaterialCatalogLabel, type PanelMaterial, type WoodPanelMaterial } from "../domain/components/panelMaterials";
 import { componentUsageLabels, componentUsageOptions, normalizeUsageTags, type ComponentUsageTag } from "../domain/components/componentUsage";
 import {
   createCenteredPanelCutout,
@@ -499,7 +499,10 @@ const copy = {
     materials: {
       oak: "NATURAL OAK",
       walnut: "WALNUT",
-      acrylic: "ACRYLIC",
+      acrylic: "CLEAR ACRYLIC",
+      acrylicOrange: "ORANGE ACRYLIC",
+      acrylicKleinBlue: "KLEIN BLUE ACRYLIC",
+      acrylicGreen: "GREEN ACRYLIC",
       stainless: "STAINLESS",
       matteBlack: "MATTE BLACK",
       whiteMetal: "WHITE",
@@ -631,7 +634,10 @@ const copy = {
     materials: {
       oak: "原木纹",
       walnut: "胡桃木纹",
-      acrylic: "亚克力",
+      acrylic: "透明亚克力",
+      acrylicOrange: "橙色亚克力",
+      acrylicKleinBlue: "克莱因蓝亚克力",
+      acrylicGreen: "绿色亚克力",
       stainless: "不锈钢色",
       matteBlack: "哑黑色",
       whiteMetal: "白色",
@@ -731,6 +737,51 @@ function getRodBaseLengthMm(id: string, dimensions: FrameDimensions, addedParts:
   const dimensionAxis = builtInRodDimensionAxis[id];
   if (dimensionAxis) return dimensions[dimensionAxis];
   return addedParts.find((part) => part.id === id)?.libraryPart?.shaftParameters?.length ?? 1000;
+}
+
+function formatStructureMillimeters(value: number): string {
+  return String(Math.round(value * 10) / 10);
+}
+
+function getStructurePartSpecification({
+  id,
+  lang,
+  dimensions,
+  transforms,
+  addedParts,
+}: {
+  id: string;
+  lang: Lang;
+  dimensions: FrameDimensions;
+  transforms: Record<string, PartTransform>;
+  addedParts: AddedPart[];
+}): string {
+  const addedPart = addedParts.find((part) => part.id === id);
+  const kind = addedPart?.kind ?? (id.startsWith("R-") ? "rod" : id.startsWith("P-") ? "panel" : "joint");
+  const transform = getPartTransform(transforms, id);
+  const format = formatStructureMillimeters;
+  const unit = lang === "zh" ? "mm" : "MM";
+
+  if (kind === "rod") {
+    const diameter = transform.sizeY;
+    const length = getRodBaseLengthMm(id, dimensions, addedParts) * transform.sizeX / 100;
+    return `Ø${format(diameter)} × ${format(length)} ${unit}`;
+  }
+
+  if (kind === "panel") {
+    const effectiveTransform = !addedPart && !transforms[id]
+      ? {
+          ...transform,
+          sizeX: Math.max(40, dimensions.width - 20),
+          sizeZ: Math.max(40, dimensions.depth - 15),
+        }
+      : transform;
+    return `${format(effectiveTransform.sizeX)} × ${format(effectiveTransform.sizeZ)} × ${format(effectiveTransform.sizeY)} ${unit}`;
+  }
+
+  const libraryPart = addedPart?.libraryPart ?? defaultCrossConnectorPart;
+  const envelope = `${format(libraryPart.dimensions.width)} × ${format(libraryPart.dimensions.length)} × ${format(libraryPart.dimensions.height)} ${unit}`;
+  return `${libraryPart.model} · ${envelope}`;
 }
 
 const joints = [
@@ -1273,7 +1324,7 @@ function getPartMaterial(
   return materials[id] ?? (id.startsWith("P-") ? "acrylic" : "stainless");
 }
 
-function createWoodTexture(material: Exclude<PanelMaterial, "acrylic">) {
+function createWoodTexture(material: WoodPanelMaterial) {
   const canvas = document.createElement("canvas");
   canvas.width = 512;
   canvas.height = 128;
@@ -2017,11 +2068,14 @@ function ComponentModel({ part, displayMode = "preview", onObjectReady }: { part
   const panelMaterial = part.kind === "panel" ? inferPanelMaterial(part) : null;
   const metalMaterial = part.kind === "panel" ? null : inferMetalMaterial(part);
   const metalSpec = metalMaterial ? metalMaterialSpecs[metalMaterial] : metalMaterialSpecs.stainless;
-  const isAcrylic = panelMaterial === "acrylic";
+  const acrylicColorSpec = panelMaterial && isAcrylicPanelMaterial(panelMaterial)
+    ? acrylicPanelColorSpecs[panelMaterial]
+    : null;
+  const isAcrylic = Boolean(acrylicColorSpec);
   const isWood = panelMaterial === "oak" || panelMaterial === "walnut";
-  const color = isAcrylic ? acrylicLiquidGlassMaterial.color : panelMaterial === "oak" ? "#b98b57" : panelMaterial === "walnut" ? "#5a3524" : metalSpec.color;
+  const color = acrylicColorSpec?.color ?? (panelMaterial === "oak" ? "#b98b57" : panelMaterial === "walnut" ? "#5a3524" : metalSpec.color);
   const woodTexture = useMemo(
-    () => panelMaterial && panelMaterial !== "acrylic" ? createWoodTexture(panelMaterial) : null,
+    () => panelMaterial === "oak" || panelMaterial === "walnut" ? createWoodTexture(panelMaterial) : null,
     [panelMaterial],
   );
   const acrylicTexture = useMemo(
@@ -2063,7 +2117,7 @@ function ComponentModel({ part, displayMode = "preview", onObjectReady }: { part
         clearcoatRoughness={acrylicLiquidGlassMaterial.clearcoatRoughness}
         reflectivity={acrylicLiquidGlassMaterial.reflectivity}
         envMapIntensity={acrylicLiquidGlassMaterial.envMapIntensity}
-        attenuationColor={acrylicLiquidGlassMaterial.attenuationColor}
+        attenuationColor={acrylicColorSpec?.attenuationColor ?? acrylicLiquidGlassMaterial.attenuationColor}
         attenuationDistance={acrylicLiquidGlassMaterial.attenuationDistance}
       />
     )
@@ -2317,6 +2371,11 @@ function structuralPartFromBox({
   const maxMm = box.max.toArray().map((value) => value * sceneUnitMm) as Vec3Tuple;
   const centerMm = box.getCenter(new THREE.Vector3()).toArray().map((value) => value * sceneUnitMm) as Vec3Tuple;
   const sizeMm = box.getSize(new THREE.Vector3()).toArray().map((value) => value * sceneUnitMm) as Vec3Tuple;
+  const structuralMaterial: StructuralMaterial = isAcrylicPanelMaterial(material)
+    ? "acrylic"
+    : material === "oak" || material === "walnut"
+      ? "wood"
+      : "steel";
   return {
     id,
     kind,
@@ -2324,10 +2383,11 @@ function structuralPartFromBox({
     maxMm,
     centerMm,
     sizeMm,
+    material: structuralMaterial,
     massKg: estimatePartMassKg({
       kind,
       sizeMm,
-      material: material === "acrylic" ? "acrylic" : material === "oak" || material === "walnut" ? "wood" : "steel",
+      material: structuralMaterial,
     }),
     requiredConnectionCount,
   };
@@ -2494,12 +2554,15 @@ function ImportedComponentModel({ part, displayMode = "preview", onObjectReady }
     );
     const panelMaterial = part.kind === "panel" ? inferPanelMaterial(part) : null;
     const metalSpec = part.kind === "panel" ? metalMaterialSpecs.stainless : metalMaterialSpecs[inferMetalMaterial(part)];
+    const acrylicColorSpec = panelMaterial && isAcrylicPanelMaterial(panelMaterial)
+      ? acrylicPanelColorSpecs[panelMaterial]
+      : null;
     const surfaceColor = panelMaterial === "oak"
       ? "#b98b57"
       : panelMaterial === "walnut"
         ? "#5a3524"
-        : panelMaterial === "acrylic"
-          ? acrylicLiquidGlassMaterial.color
+        : acrylicColorSpec
+          ? acrylicColorSpec.color
           : metalSpec.color;
     clone.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
@@ -2508,9 +2571,9 @@ function ImportedComponentModel({ part, displayMode = "preview", onObjectReady }
         color: surfaceColor,
         metalness: panelMaterial ? 0.02 : metalSpec.metalness,
         roughness: panelMaterial ? 0.52 : metalSpec.roughness,
-        transparent: panelMaterial === "acrylic",
-        opacity: panelMaterial === "acrylic" ? acrylicLiquidGlassMaterial.previewOpacity : 1,
-        transmission: panelMaterial === "acrylic" ? acrylicLiquidGlassMaterial.transmission : 0,
+        transparent: Boolean(acrylicColorSpec),
+        opacity: acrylicColorSpec ? acrylicLiquidGlassMaterial.previewOpacity : 1,
+        transmission: acrylicColorSpec ? acrylicLiquidGlassMaterial.transmission : 0,
         clearcoat: 0.28,
         clearcoatRoughness: 0.16,
         envMapIntensity: 1.45,
@@ -3794,6 +3857,8 @@ function StructurePanel({
   lang,
   selectedIds,
   addedParts,
+  dimensions,
+  transforms,
   userGroups,
   resolvedRiskIds,
   deletedIds,
@@ -3819,6 +3884,8 @@ function StructurePanel({
   lang: Lang;
   selectedIds: string[];
   addedParts: AddedPart[];
+  dimensions: FrameDimensions;
+  transforms: Record<string, PartTransform>;
   userGroups: UserGroup[];
   resolvedRiskIds: ReadonlySet<string>;
   deletedIds: ReadonlySet<string>;
@@ -3876,8 +3943,9 @@ function StructurePanel({
         ...group,
         partIds: eligiblePartIds,
         visiblePartIds: eligiblePartIds.filter((id) => {
-      const part = getPartInfo(id, lang, resolvedRiskIds, addedParts);
-          return `${id} ${part.title} ${part.componentId}`
+          const part = getPartInfo(id, lang, resolvedRiskIds, addedParts);
+          const specification = getStructurePartSpecification({ id, lang, dimensions, transforms, addedParts });
+          return `${id} ${part.title} ${part.componentId} ${specification}`
             .toLowerCase()
             .includes(normalizedQuery);
         }),
@@ -4132,6 +4200,7 @@ function StructurePanel({
                 <div className="tree-children">
                   {group.visiblePartIds.map((id) => {
                     const part = getPartInfo(id, lang, resolvedRiskIds, addedParts);
+                    const specification = getStructurePartSpecification({ id, lang, dimensions, transforms, addedParts });
                     return (
                       <div className="tree-node-row" key={`${group.id}-${id}`}>
                         <button
@@ -4140,11 +4209,16 @@ function StructurePanel({
                           } ${hiddenIds.has(id) ? "hidden-part" : ""} ${lockedIds.has(id) ? "locked-part" : ""}`}
                           type="button"
                           aria-pressed={selectedIds.includes(id)}
+                          data-component-spec={specification}
+                          title={`${id} · ${part.title} · ${specification}`}
                           onClick={(event) => onSelect(id, event.shiftKey)}
                         >
                           <span className="tree-branch" aria-hidden="true" />
                           <span className="tree-node-id">{id}</span>
-                          <span className="tree-node-name">{part.title}</span>
+                          <span className="tree-node-details">
+                            <span className="tree-node-name">{part.title}</span>
+                            <span className="tree-node-spec">{specification}</span>
+                          </span>
                           {hiddenIds.has(id) && <EyeOff size={12} />}
                           {lockedIds.has(id) && <Lock size={12} />}
                           {part.warning && <AlertTriangle size={13} />}
@@ -5238,7 +5312,10 @@ function PanelEdgeHandles({
   const lengthScene = Math.max(0.4, mmToScene(transform.sizeX));
   const widthScene = Math.max(0.3, mmToScene(transform.sizeZ));
   const thicknessScene = Math.max(0.025, mmToScene(transform.sizeY));
-  const handleY = thicknessScene / 2 + 0.055;
+  const handleY = thicknessScene / 2 + 0.018;
+  const visualLineThickness = 0.025;
+  const visualLineHeight = 0.016;
+  const visualLineOverhang = 0.05;
   const edgeRefs: Record<PanelEdgeName, React.RefObject<THREE.Mesh | null>> = {
     "x-negative": xNegativeRef,
     "x-positive": xPositiveRef,
@@ -5403,24 +5480,32 @@ function PanelEdgeHandles({
     ref: React.RefObject<THREE.Mesh | null>,
   ) => {
     const axis = edge.startsWith("x") ? "x" : "z";
+    const visualSize: Vec3Tuple = axis === "x"
+      ? [visualLineThickness, visualLineHeight, widthScene + visualLineOverhang]
+      : [lengthScene + visualLineOverhang, visualLineHeight, visualLineThickness];
     return (
-      <mesh
-        ref={ref}
-        position={position}
-        renderOrder={21}
-        onClick={(event) => event.stopPropagation()}
-        onPointerDown={(event) => beginDrag(edge, event)}
-        onPointerMove={dragEdge}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        onPointerOver={() => { gl.domElement.style.cursor = axis === "x" ? "ew-resize" : "ns-resize"; }}
-        onPointerOut={() => {
-          if (!dragging.current) gl.domElement.style.cursor = "";
-        }}
-      >
-        <boxGeometry args={handleSize} />
-        <meshBasicMaterial color="#39e66d" depthTest={false} transparent opacity={0.92} />
-      </mesh>
+      <group position={position}>
+        <mesh
+          ref={ref}
+          renderOrder={21}
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => beginDrag(edge, event)}
+          onPointerMove={dragEdge}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onPointerOver={() => { gl.domElement.style.cursor = axis === "x" ? "ew-resize" : "ns-resize"; }}
+          onPointerOut={() => {
+            if (!dragging.current) gl.domElement.style.cursor = "";
+          }}
+        >
+          <boxGeometry args={handleSize} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+        <mesh renderOrder={22} raycast={() => null}>
+          <boxGeometry args={visualSize} />
+          <meshBasicMaterial color="#39e66d" depthTest={false} transparent opacity={0.78} />
+        </mesh>
+      </group>
     );
   };
 
@@ -5471,18 +5556,20 @@ function PanelCutoutMesh({
   selected: boolean;
   wireframe?: boolean;
 }) {
+  const isAcrylic = isAcrylicPanelMaterial(material);
+  const acrylicColorSpec = isAcrylicPanelMaterial(material) ? acrylicPanelColorSpecs[material] : null;
   const size = useMemo<Vec3Tuple>(() => [
     Math.max(0.4, mmToScene(widthMm)),
     Math.max(0.025, mmToScene(thicknessMm)),
     Math.max(0.3, mmToScene(lengthMm)),
   ], [lengthMm, thicknessMm, widthMm]);
   const woodTexture = useMemo(
-    () => (material === "acrylic" ? null : createWoodTexture(material)),
+    () => (material === "oak" || material === "walnut" ? createWoodTexture(material) : null),
     [material],
   );
   const acrylicTexture = useMemo(
-    () => material === "acrylic" ? createAcrylicLiquidGlassTexture() : null,
-    [material],
+    () => isAcrylic ? createAcrylicLiquidGlassTexture() : null,
+    [isAcrylic],
   );
   const drilledGeometry = useMemo(() => {
     if (cutouts.length === 0) return null;
@@ -5507,9 +5594,9 @@ function PanelCutoutMesh({
   return (
     <mesh geometry={drilledGeometry ?? undefined}>
       {!drilledGeometry && <boxGeometry args={size} />}
-      {material === "acrylic" ? (
+      {isAcrylic ? (
         <meshPhysicalMaterial
-          color={acrylicLiquidGlassMaterial.color}
+          color={acrylicColorSpec?.color ?? acrylicLiquidGlassMaterial.color}
           map={acrylicTexture ?? undefined}
           roughnessMap={acrylicTexture ?? undefined}
           transparent
@@ -5523,7 +5610,7 @@ function PanelCutoutMesh({
           clearcoatRoughness={acrylicLiquidGlassMaterial.clearcoatRoughness}
           reflectivity={acrylicLiquidGlassMaterial.reflectivity}
           envMapIntensity={acrylicLiquidGlassMaterial.envMapIntensity}
-          attenuationColor={acrylicLiquidGlassMaterial.attenuationColor}
+          attenuationColor={acrylicColorSpec?.attenuationColor ?? acrylicLiquidGlassMaterial.attenuationColor}
           attenuationDistance={acrylicLiquidGlassMaterial.attenuationDistance}
           emissive={selected ? "#ffffff" : "#000000"}
           emissiveIntensity={selected ? 0.06 : 0}
@@ -7326,7 +7413,7 @@ function MaterialSelector({
   const t = copy[lang];
   const options: PartMaterial[] =
     kind === "panel"
-      ? ["oak", "walnut", "acrylic"]
+      ? ["oak", "walnut", "acrylic", "acrylicOrange", "acrylicKleinBlue", "acrylicGreen"]
       : ["stainless", "matteBlack", "whiteMetal"];
 
   return (
@@ -7407,6 +7494,12 @@ function StructuralStatusCard({
   const isEmpty = analysis.totalMassKg === 0;
   const hasErrors = issues.some(({ severity }) => severity === "error");
   const hasWarnings = issues.some(({ severity }) => severity === "warning");
+  const formatMass = (massKg: number) => massKg >= 10 ? massKg.toFixed(1) : massKg.toFixed(2);
+  const materialMasses = (Object.keys(STRUCTURAL_MATERIAL_SPECS) as StructuralMaterial[]).map((material) => ({
+    material,
+    massKg: analysis.massByMaterialKg[material],
+    spec: STRUCTURAL_MATERIAL_SPECS[material],
+  }));
   const tone: StatusTone = isEmpty ? "neutral" : hasErrors ? "danger" : hasWarnings ? "warning" : "success";
   const status = isEmpty
     ? (lang === "zh" ? "等待零件" : "WAITING FOR PARTS")
@@ -7436,10 +7529,36 @@ function StructuralStatusCard({
       </div>
       {!compact && analysis.centerOfMassMm && (
         <dl className="structural-metrics">
-          <div><dt>{lang === "zh" ? "估算自重" : "MASS"}</dt><dd>{analysis.totalMassKg}<span>KG</span></dd></div>
+          <div><dt>{lang === "zh" ? "方案估重" : "EST. MASS"}</dt><dd>{formatMass(analysis.totalMassKg)}<span>KG</span></dd></div>
           <div><dt>{lang === "zh" ? "重心高度" : "COM HEIGHT"}</dt><dd>{Math.round(analysis.centerOfMassMm[1])}<span>MM</span></dd></div>
           <div><dt>{lang === "zh" ? "落地节点" : "GROUNDED"}</dt><dd>{analysis.groundedPartIds.length}<span>{lang === "zh" ? "个" : "PCS"}</span></dd></div>
         </dl>
+      )}
+      {!isEmpty && (
+        <section className={`structural-material-mass ${compact ? "compact" : ""}`} aria-label={lang === "zh" ? "材料重量估算" : "MATERIAL MASS ESTIMATE"}>
+          <header>
+            <span>{lang === "zh" ? "整体方案估重" : "TOTAL ESTIMATED MASS"}</span>
+            <strong>{formatMass(analysis.totalMassKg)} <small>KG</small></strong>
+          </header>
+          <dl>
+            {materialMasses.map(({ material, massKg, spec }) => (
+              <div key={material}>
+                <dt>
+                  <i className={`structural-material-dot structural-material-dot-${material}`} aria-hidden="true" />
+                  {lang === "zh" ? spec.labelZh : spec.labelEn}
+                </dt>
+                <dd>{formatMass(massKg)} <span>KG</span></dd>
+              </div>
+            ))}
+          </dl>
+          {!compact && (
+            <p>
+              {lang === "zh"
+                ? `密度假设：不锈钢 ${STRUCTURAL_MATERIAL_SPECS.steel.densityKgPerM3}、普通海洋板 ${STRUCTURAL_MATERIAL_SPECS.wood.densityKgPerM3}、亚克力 ${STRUCTURAL_MATERIAL_SPECS.acrylic.densityKgPerM3} kg/m³。连接件按含孔与开槽的简化体积估算。`
+                : `DENSITY ASSUMPTIONS: STAINLESS ${STRUCTURAL_MATERIAL_SPECS.steel.densityKgPerM3}, MARINE PLYWOOD ${STRUCTURAL_MATERIAL_SPECS.wood.densityKgPerM3}, ACRYLIC ${STRUCTURAL_MATERIAL_SPECS.acrylic.densityKgPerM3} KG/M³. CONNECTORS USE A SIMPLIFIED HOLLOW-VOLUME FACTOR.`}
+            </p>
+          )}
+        </section>
       )}
       {isEmpty ? (
         <p className="structural-empty-message">
@@ -8386,7 +8505,7 @@ function ProjectsPage({
         </div>
         <div>
           <button className="icon-button" type="button" onClick={onBack}><ChevronLeft size={16} />{isZh ? "返回设计器" : "BACK TO DESIGN"}</button>
-          <button className="icon-button" type="button" onClick={onExportBackup}><Download size={16} />{isZh ? "备份 JSON" : "BACKUP JSON"}</button>
+          <button className="icon-button" type="button" onClick={onExportBackup}><Download size={16} />{isZh ? "备份全部" : "BACK UP ALL"}</button>
           <label className="icon-button projects-import-button"><FolderOpen size={16} />{isZh ? "恢复备份" : "RESTORE"}<input type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) onImportBackup(file); event.target.value = ""; }} /></label>
           <button className="primary-button" type="button" onClick={onCreate}><Plus size={16} />{isZh ? "新建项目" : "NEW PROJECT"}</button>
         </div>
@@ -10914,6 +11033,8 @@ export function App() {
                   lang={lang}
                   selectedIds={selectedIds}
                   addedParts={addedParts}
+                  dimensions={dimensions}
+                  transforms={transforms}
                   userGroups={userGroups}
                   resolvedRiskIds={resolvedRiskIds}
                   deletedIds={deletedIds}
