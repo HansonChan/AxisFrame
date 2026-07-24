@@ -2,6 +2,8 @@
 
 [中文](README.md) | **English**
 
+![AxisFrame 3D design workspace preview](axisframe.png)
+
 AxisFrame is a constraint-driven 3D design tool for DIY makers and lightweight structural projects. It brings real-scale linear shafts, connectors, bearings, and panels into a single browser-based workspace, helping people without traditional CAD experience build understandable, editable structures and turn them into practical procurement and assembly plans.
 
 ## Key Features
@@ -70,4 +72,4 @@ AxisFrame currently stores projects in the browser's local storage. Export a pro
 
 ## License
 
-AxisFrame is licensed under the [Apache License 2.0](LICENSE).
+AxisFrame is licensed under the [MIT License](LICENSE).
