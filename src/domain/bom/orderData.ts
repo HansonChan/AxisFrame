@@ -97,7 +97,7 @@ export function buildOrderData(input: OrderDataInput) {
     } else {
       hardware.push({
         id: part.id,
-        sku: part.libraryPart?.model ?? "CROSS-SPLIT-10-10",
+        sku: part.libraryPart?.model ?? "EQUAL-CROSS-10-10",
         material,
         fastener: "按组件规格",
         source: sourceFor(part),

@@ -1436,11 +1436,11 @@ function createAcrylicLiquidGlassTexture() {
 const defaultPart: PartInfo = {
   id: "J-010",
   kind: "joint",
-  title: "SPLIT CROSS CONNECTOR",
+  title: "EQUAL-BORE CROSS CLAMP",
   status: "PENDING REVIEW",
-  componentId: "CROSS-SPLIT-10-10",
-  sku: "CROSS-SPLIT-10-10",
-  orientation: "ORTHOGONAL SPLIT BORE",
+  componentId: "EQUAL-CROSS-10-10",
+  sku: "EQUAL-CROSS-10-10",
+  orientation: "ORTHOGONAL EQUAL BORE",
   compatibleRod: "Ø10 MM",
   centerOffset: "UNMEASURED",
   linkedRods: "R-004, R-009",
@@ -1604,7 +1604,6 @@ const defaultVerticalFixedBaseDefinition = createVerticalFixedBaseDefinition(def
 const defaultShaftStopDefinition = createShaftStopDefinition(defaultShaftStopParameters);
 
 const rawComponentGeometries = {
-  crossSplitConnector: { primitives: [{ shape: "box", size: [2.8, 0.9, 0.9], position: [0, 0, 0] }, { shape: "cylinder", size: [0.58, 1.02, 0.58], position: [0.76, 0, 0], appearance: "cutout" }, { shape: "cylinder", size: [0.58, 1.02, 0.58], position: [-0.62, 0, 0], rotation: [90, 0, 0], appearance: "cutout" }, { shape: "box", size: [1.05, 0.1, 0.94], position: [1.16, 0, 0], appearance: "cutout" }, { shape: "cylinder", size: [0.24, 1.04, 0.24], position: [-1.05, 0, 0.28] }, { shape: "cylinder", size: [0.24, 1.04, 0.24], position: [1.08, 0, -0.28], rotation: [90, 0, 0] }], ports: [{ id: "SHAFT-Y", axis: "y", position: [0.76, 0, 0], diameter: 10 }, { id: "SHAFT-Z", axis: "z", position: [-0.62, 0, 0], diameter: 10 }, { id: "CLAMP-Y", axis: "y", position: [-1.05, 0, 0.28], diameter: 4 }, { id: "CLAMP-Z", axis: "z", position: [1.08, 0, -0.28], diameter: 4 }] },
   singleBoreFixedClamp: { primitives: [{ shape: "box", size: [1.7, 2.1, 1.25], position: [0, 0, 0] }, { shape: "cylinder", size: [0.72, 1.42, 0.72], position: [0, -0.2, 0], rotation: [90, 0, 0], appearance: "cutout" }, { shape: "box", size: [0.16, 1.08, 1.3], position: [0, 0.74, 0], appearance: "cutout" }, { shape: "cylinder", size: [0.25, 0.5, 0.25], position: [-0.43, 1.12, 0] }, { shape: "cylinder", size: [0.25, 0.5, 0.25], position: [0.43, 1.12, 0] }, { shape: "cylinder", size: [0.2, 1.78, 0.2], position: [0, 0.53, 0.35], rotation: [0, 0, 90], appearance: "cutout" }, { shape: "cylinder", size: [0.2, 1.78, 0.2], position: [0, -0.68, 0.35], rotation: [0, 0, 90], appearance: "cutout" }], ports: [{ id: "SHAFT", axis: "z", position: [0, -0.2, 0], diameter: 10 }, { id: "MOUNT-TOP", axis: "x", position: [0, 0.53, 0.35], diameter: 5 }, { id: "MOUNT-BOTTOM", axis: "x", position: [0, -0.68, 0.35], diameter: 5 }, { id: "CLAMP-L", axis: "y", position: [-0.43, 1.12, 0], diameter: 4 }, { id: "CLAMP-R", axis: "y", position: [0.43, 1.12, 0], diameter: 4 }] },
   parallelClamp: { primitives: defaultParallelClampDefinition.primitives, ports: defaultParallelClampDefinition.ports },
   equalBoreCrossClamp: { primitives: defaultEqualBoreCrossClampDefinition.primitives, ports: defaultEqualBoreCrossClampDefinition.ports },
@@ -1616,12 +1615,8 @@ const rawComponentGeometries = {
   verticalFixedBase: { primitives: defaultVerticalFixedBaseDefinition.primitives, ports: defaultVerticalFixedBaseDefinition.ports },
   shaftSupport: { primitives: [{ shape: "box", size: [1.8, 0.28, 1.25], position: [0, -0.62, 0] }, { shape: "box", size: [1.05, 1.25, 0.78], position: [0, 0, 0] }, { shape: "cylinder", size: [0.42, 1.4, 0.42], position: [0, 0.12, 0], rotation: [90, 0, 0] }], ports: [{ id: "SHAFT", axis: "z", position: [0, 0.12, 0], diameter: 10 }, { id: "MOUNT", axis: "y", position: [0, -0.76, 0], diameter: 0 }] },
   linearBushing: { primitives: [{ shape: "cylinder", size: [0.9, 1.8, 0.9], position: [0, 0, 0], rotation: [90, 0, 0] }, { shape: "cylinder", size: [0.38, 2, 0.38], position: [0, 0, 0], rotation: [90, 0, 0] }], ports: [{ id: "SLIDE", axis: "z", position: [0, 0, 0], diameter: 10 }] },
-  roundFlange: { primitives: [{ shape: "cylinder", size: [1.8, 0.2, 1.8], position: [0, 0, -0.55], rotation: [90, 0, 0] }, { shape: "cylinder", size: [0.95, 1.6, 0.95], position: [0, 0, 0.15], rotation: [90, 0, 0] }, { shape: "cylinder", size: [0.36, 2, 0.36], position: [0, 0, 0], rotation: [90, 0, 0] }], ports: [{ id: "SLIDE", axis: "z", position: [0, 0, 0], diameter: 10 }, { id: "FLANGE", axis: "z", position: [0, 0, -0.65], diameter: 0 }] },
-  squareFlange: { primitives: [{ shape: "box", size: [1.8, 1.8, 0.2], position: [0, 0, -0.55] }, { shape: "cylinder", size: [0.95, 1.6, 0.95], position: [0, 0, 0.15], rotation: [90, 0, 0] }, { shape: "cylinder", size: [0.36, 2, 0.36], position: [0, 0, 0], rotation: [90, 0, 0] }], ports: [{ id: "SLIDE", axis: "z", position: [0, 0, 0], diameter: 10 }, { id: "FLANGE", axis: "z", position: [0, 0, -0.65], diameter: 0 }] },
-  bushingBlock: { primitives: [{ shape: "box", size: [2.1, 1.3, 1.45], position: [0, 0, 0] }, { shape: "cylinder", size: [0.42, 2.4, 0.42], position: [0, 0.12, 0], rotation: [90, 0, 0] }], ports: [{ id: "SLIDE", axis: "z", position: [0, 0.12, 0], diameter: 10 }, { id: "TABLE", axis: "y", position: [0, 0.65, 0], diameter: 0 }] },
   shaftCollar: { primitives: [{ shape: "cylinder", size: [1.5, 0.5, 1.5], position: [0, 0, 0], rotation: [90, 0, 0] }, { shape: "box", size: [0.48, 0.42, 0.34], position: [0, 0.58, 0] }], ports: [{ id: "SHAFT", axis: "z", position: [0, 0, 0], diameter: 10 }] },
   fixedRing: { primitives: defaultShaftStopDefinition.primitives, ports: defaultShaftStopDefinition.ports },
-  tWallClamp: { primitives: [{ shape: "box", size: [1.45, 0.58, 1.9], position: [0, 0, 0.1] }, { shape: "box", size: [3, 0.58, 0.72], position: [0, 0, -0.92] }, { shape: "box", size: [0.24, 0.72, 0.58], position: [0.72, 0, 0.46] }, { shape: "cylinder", size: [0.68, 0.6, 0.68], position: [0, 0.01, 0.1], appearance: "cutout" }, { shape: "cylinder", size: [0.28, 0.6, 0.28], position: [-1.05, 0.01, -0.92], appearance: "cutout" }, { shape: "cylinder", size: [0.28, 0.6, 0.28], position: [1.05, 0.01, -0.92], appearance: "cutout" }, { shape: "box", size: [0.08, 0.62, 0.62], position: [0, 0.01, 0.72], appearance: "cutout" }], ports: [{ id: "SHAFT", axis: "y", position: [0, 0, 0.1], diameter: 10 }, { id: "MOUNT-L", axis: "y", position: [-1.05, 0, -0.92], diameter: 5 }, { id: "MOUNT-R", axis: "y", position: [1.05, 0, -0.92], diameter: 5 }, { id: "CLAMP", axis: "x", position: [0.72, 0, 0.46], diameter: 4 }] },
 } satisfies Record<string, RawComponentGeometry>;
 
 function upgradeComponentPort(geometryId: string, port: RawComponentGeometry["ports"][number]): ComponentPort {
@@ -1636,7 +1631,7 @@ function upgradeComponentPort(geometryId: string, port: RawComponentGeometry["po
         : id.includes("CLAMP") || id.includes("LOCK")
           ? "fastener"
           : "support";
-  const behavior: PortBehavior = id.includes("SLIDE") || ["linearBushing", "roundFlange", "squareFlange", "bushingBlock"].includes(geometryId)
+  const behavior: PortBehavior = id.includes("SLIDE") || geometryId === "linearBushing"
     ? "slide"
     : ["shaftCollar", "fixedRing"].includes(geometryId)
       ? "stop"
@@ -1773,7 +1768,6 @@ const componentGeometries = Object.fromEntries(
 ) as Record<keyof typeof rawComponentGeometries, ComponentGeometry>;
 
 const initialLibraryParts: LibraryPart[] = [
-  { id: "lib-cross-split-10", model: "CROSS-SPLIT-10-10", name: "十字型连接件", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 50, length: 20, height: 20 }, compatibleRod: "Ø10 mm（图片推测）", connector: "双孔正交 / 分体夹紧", usageTags: ["corner-connection", "frame-structure"], source: "manual", updatedAt: "2026-07-13", geometry: componentGeometries.crossSplitConnector, referenceLabel: "用户提供实物参考图（尺寸待复核）", referenceUrl: "/assets/images/cross-split-connector-reference.png" },
   { id: "lib-single-bore-fixed-clamp-10", model: "SINGLE-BORE-CLAMP-10", name: "单孔固定夹", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 30, length: 20, height: 40 }, compatibleRod: "Ø10 mm（图片推测）", connector: "单孔夹紧 / 侧面安装", usageTags: ["panel-support", "wall-mount"], source: "manual", updatedAt: "2026-07-13", geometry: componentGeometries.singleBoreFixedClamp, referenceLabel: "用户提供实物参考图（尺寸待复核）", referenceUrl: "/assets/images/single-bore-fixed-clamp-reference.png" },
   { id: "lib-para-10", model: parallelClampModel(defaultParallelClampParameters), name: "平行夹", kind: "joint", status: "ready", material: "不锈钢", dimensions: { width: 45, length: 20, height: 20 }, parallelClampParameters: defaultParallelClampParameters, variantCount: parallelClampVariants.length, compatibleRod: "Ø10 mm × Ø10 mm", connector: "同径平行双孔 / 中心距 15 mm / M5", usageTags: ["parallel-connection", "frame-structure"], source: "three-view", updatedAt: "2026-07-22", geometry: componentGeometries.parallelClamp, referenceLabel: "用户提供结构图及 16 个库存尺寸组合", referenceUrl: "/assets/references/parallel-clamp/size-table.png" },
   { id: "lib-equal-cross-10", model: equalBoreCrossClampModel(defaultEqualBoreCrossClampVariant.diameter), name: "同径双孔十字夹", kind: "joint", status: "ready", material: "不锈钢", dimensions: { width: 45, length: 20, height: 20 }, equalBoreCrossClampDiameter: defaultEqualBoreCrossClampVariant.diameter, variantCount: equalBoreCrossClampVariants.length, compatibleRod: `Ø${defaultEqualBoreCrossClampVariant.diameter} mm × Ø${defaultEqualBoreCrossClampVariant.diameter} mm`, connector: `正交同径双孔 / 孔距 ${defaultEqualBoreCrossClampVariant.holeCenterDistance} mm`, usageTags: ["corner-connection", "frame-structure"], source: "manual", updatedAt: "2026-07-22", geometry: componentGeometries.equalBoreCrossClamp, referenceLabel: "用户提供顶视图、侧视图及 11 个型号尺寸表", referenceUrl: "/assets/references/equal-bore-cross-clamp-views.png" },
@@ -1785,31 +1779,44 @@ const initialLibraryParts: LibraryPart[] = [
   { id: "lib-sk10", model: defaultVerticalFixedBaseVariant.model, name: "立式固定座", kind: "joint", status: "ready", material: "不锈钢", dimensions: { width: 42, length: 14, height: 32.8 }, verticalFixedBaseShaftDiameter: defaultVerticalFixedBaseVariant.shaftDiameter, variantCount: verticalFixedBaseVariants.length, compatibleRod: `Ø${defaultVerticalFixedBaseVariant.shaftDiameter} mm`, connector: `夹紧支撑 / 2 × Ø${defaultVerticalFixedBaseVariant.s} 底面安装 / 孔距 ${defaultVerticalFixedBaseVariant.b} mm`, usageTags: ["panel-support", "base-foot"], source: "three-view", updatedAt: "2026-07-22", geometry: componentGeometries.verticalFixedBase, referenceLabel: "用户提供结构图及 SK8–SK16 五组尺寸表", referenceUrl: "/assets/references/vertical-fixed-base/size-table.png" },
   { id: "lib-shf10", model: "SHF10", name: "法兰式光轴支座", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 43, length: 10, height: 24 }, compatibleRod: "Ø10 mm", connector: "夹紧支撑 / 法兰安装", usageTags: ["wall-mount", "panel-support"], source: "manual", updatedAt: "2026-07-12", geometry: componentGeometries.shaftSupport, referenceLabel: "Tuli SHF10 STEP", referenceUrl: "https://www.tuli-shop.com/linear-shaft-support-shf-10", modelAssetUrl: "/assets/components/shaft-supports/SHF10/SHF10.glb", modelAssetName: "SHF10.step" },
   { id: "lib-lm10", model: "LM10", name: "直筒型直线轴承", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 19, length: 29, height: 19 }, compatibleRod: "Ø10 mm", connector: "轴向滑动", usageTags: ["linear-motion"], source: "manual", updatedAt: "2026-07-12", geometry: componentGeometries.linearBushing, referenceLabel: "THK Linear Bushing LM", referenceUrl: "https://www.thk.com/eu/en/products/other_linear_motion_guides/linear_bushing/flange_less_type/lm_aj_op/" },
-  { id: "lib-lmf10", model: "LMF10", name: "圆法兰直线轴承", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 40, length: 35, height: 40 }, compatibleRod: "Ø10 mm", connector: "轴向滑动 / 圆法兰安装", usageTags: ["linear-motion", "wall-mount"], source: "manual", updatedAt: "2026-07-12", geometry: componentGeometries.roundFlange, referenceLabel: "THK Circular Flange Linear Bushing", referenceUrl: "https://www.thk.com/us/en/products/other_linear_motion_guides/linear_bushing/" },
-  { id: "lib-lmk10", model: "LMK10UU", name: "方法兰直线轴承", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 39.991, length: 29, height: 39.991 }, compatibleRod: "Ø10 mm", connector: "轴向滑动 / 方法兰安装", usageTags: ["linear-motion", "wall-mount"], source: "manual", updatedAt: "2026-07-12", geometry: componentGeometries.squareFlange, referenceLabel: "Tuli LMK10UU STEP", referenceUrl: "https://www.tuli.hr/linearni-lezaj-lmk-10-uu-10x19x29mm", modelAssetUrl: "/assets/components/linear-bearings/LMK10UU/LMK10UU.glb", modelAssetName: "LMK10UU.step", modelRotation: [0, 90, 0] },
-  { id: "lib-kba10uu", model: "KBA10UU", name: "带座直线轴承", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 40, length: 35, height: 26 }, compatibleRod: "Ø10 mm", connector: "轴向滑动 / 底面安装", usageTags: ["linear-motion", "base-foot"], source: "manual", updatedAt: "2026-07-12", geometry: componentGeometries.bushingBlock, referenceLabel: "Tuli KBA10UU STEP", referenceUrl: "https://www.tuli-shop.com/economy-linear-bearing-kba-10-uu", modelAssetUrl: "/assets/components/linear-bearings/KBA10UU/KBA10UU.glb", modelAssetName: "KBA10UU.step", modelRotation: [0, 90, 0] },
-  { id: "lib-sc10", model: "SC10", name: "带座直线轴承", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 40, length: 35, height: 26 }, compatibleRod: "Ø10 mm", connector: "轴向滑动 / 顶面负载", usageTags: ["linear-motion", "panel-support"], source: "manual", updatedAt: "2026-07-12", geometry: componentGeometries.bushingBlock, referenceLabel: "THK Encased Linear Bushing SC", referenceUrl: "https://www.thk.com/?q=za%2Fnode%2F17746" },
   { id: "lib-collar10", model: "NSCSS-10-10-S", name: "分体式轴环", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 30, length: 10, height: 30 }, compatibleRod: "Ø10 mm", connector: "轴向限位 / 分体夹紧", usageTags: ["axial-stop"], source: "manual", updatedAt: "2026-07-12", geometry: componentGeometries.shaftCollar, referenceLabel: "NBK Split-type Set Collar", referenceUrl: "https://www.nbk1560.com/en-US/products/machine_element/setcollar/NSCSS-S/NSCSS-10-10-S/" },
   { id: "lib-fixed-ring-10", model: shaftStopModel(defaultShaftStopParameters), name: "限位器", kind: "joint", status: "ready", material: "不锈钢", dimensions: { width: 30, length: 30, height: 10 }, parameters: defaultShaftStopParameters, variantCount: shaftStopVariants.length, compatibleRod: "Ø10 mm", connector: "轴向限位 / 开口锁紧 / M4", usageTags: ["axial-stop"], source: "three-view", updatedAt: "2026-07-22", geometry: componentGeometries.fixedRing, referenceLabel: "用户提供结构图及 18 个库存尺寸组合", referenceUrl: "/assets/references/shaft-stop/size-table.png" },
-  { id: "lib-t-wall-clamp-10", model: "T-WALL-CLAMP-10", name: "T型壁装光轴夹座", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 50, length: 42, height: 16 }, compatibleRod: "Ø10 mm（图片推测）", connector: "分体夹紧 / 双孔壁装", usageTags: ["wall-mount", "frame-structure"], source: "manual", updatedAt: "2026-07-12", geometry: componentGeometries.tWallClamp, referenceLabel: "用户提供实物参考图（尺寸待实测）", referenceUrl: "/assets/images/t-shaft-wall-clamp-reference.png" },
 ];
 
-const crossSplitConnectorPart = initialLibraryParts.find(({ id }) => id === "lib-cross-split-10")!;
+const defaultCrossConnectorPart = initialLibraryParts.find(({ id }) => id === "lib-equal-cross-10")!;
 
 function migrateRetiredCrossClampSnapshot(snapshot: EditorSnapshot): EditorSnapshot {
   const retiredIds = new Set(snapshot.addedParts
-    .filter(({ libraryPart }) => libraryPart?.id === "lib-cross-10" || libraryPart?.model === "CROSS-10-10-M1")
+    .filter(({ libraryPart }) =>
+      libraryPart?.id === "lib-cross-10"
+      || libraryPart?.model === "CROSS-10-10-M1"
+      || libraryPart?.id === "lib-cross-split-10"
+      || libraryPart?.model === "CROSS-SPLIT-10-10")
     .map(({ id }) => id));
+  const retiredImportedModelIds = new Set(["lib-kba10uu", "lib-lmk10"]);
   const genericJointIds = snapshot.addedParts.filter(({ kind, libraryPart }) => kind === "joint" && !libraryPart).map(({ id }) => id);
   const replacedIds = new Set([...joints.map(({ id }) => id), ...retiredIds, ...genericJointIds]);
-  const addedParts = snapshot.addedParts.map((part) => retiredIds.has(part.id)
-    ? { ...part, libraryPart: crossSplitConnectorPart }
-    : part);
+  const addedParts = snapshot.addedParts.map((part) => {
+    if (retiredIds.has(part.id)) return { ...part, libraryPart: defaultCrossConnectorPart };
+    if (!part.libraryPart || !retiredImportedModelIds.has(part.libraryPart.id)) return part;
+    return {
+      ...part,
+      libraryPart: {
+        ...part.libraryPart,
+        modelAssetUrl: undefined,
+        modelAssetName: undefined,
+        modelRotation: undefined,
+      },
+    };
+  });
   const transforms = { ...snapshot.transforms };
   replacedIds.forEach((id) => {
     const transform = transforms[id];
-    if (!transform || transform.sizeX !== 34 || transform.sizeY !== 34 || transform.sizeZ !== 34) return;
-    transforms[id] = { ...transform, sizeX: 50, sizeY: 20, sizeZ: 20 };
+    if (!transform || !(
+      (transform.sizeX === 34 && transform.sizeY === 34 && transform.sizeZ === 34)
+      || (transform.sizeX === 50 && transform.sizeY === 20 && transform.sizeZ === 20)
+    )) return;
+    transforms[id] = { ...transform, sizeX: 45, sizeY: 20, sizeZ: 20 };
   });
   return {
     ...snapshot,
@@ -1826,7 +1833,7 @@ function createSeededPhotoRackProject(): SavedProject | null {
   const shaft = initialLibraryParts.find(({ id }) => id === "lib-shaft-10");
   const panel = initialLibraryParts.find(({ id }) => id === "lib-panel");
   const openRingClamp = initialLibraryParts.find(({ id }) => id === "lib-fixed-ring-10");
-  const crossConnector = initialLibraryParts.find(({ id }) => id === "lib-cross-split-10");
+  const crossConnector = initialLibraryParts.find(({ id }) => id === "lib-equal-cross-10");
   if (!shaft || !panel || !openRingClamp || !crossConnector) return null;
   return createPhotoCoffeeRackProject({ shaft, panel, openRingClamp, crossConnector }) as SavedProject;
 }
@@ -1834,7 +1841,7 @@ function createSeededPhotoRackProject(): SavedProject | null {
 function createSeededPegboardStandProject(): SavedProject | null {
   const shaft = initialLibraryParts.find(({ id }) => id === "lib-shaft-10");
   const pegboard = initialLibraryParts.find(({ id }) => id === "lib-pegboard-600");
-  const crossConnector = initialLibraryParts.find(({ id }) => id === "lib-cross-split-10");
+  const crossConnector = initialLibraryParts.find(({ id }) => id === "lib-equal-cross-10");
   const panelClamp = initialLibraryParts.find(({ id }) => id === "lib-single-bore-fixed-clamp-10");
   if (!shaft || !pegboard || !crossConnector || !panelClamp) return null;
   return createStablePegboardStandProject({ shaft, pegboard, crossConnector, panelClamp }) as SavedProject;
@@ -1843,7 +1850,7 @@ function createSeededPegboardStandProject(): SavedProject | null {
 function createSeededFurnitureProjects(): SavedProject[] {
   const shaft = initialLibraryParts.find(({ id }) => id === "lib-shaft-10");
   const panel = initialLibraryParts.find(({ id }) => id === "lib-panel");
-  const crossConnector = initialLibraryParts.find(({ id }) => id === "lib-cross-split-10");
+  const crossConnector = initialLibraryParts.find(({ id }) => id === "lib-equal-cross-10");
   const panelSupport = initialLibraryParts.find(({ id }) => id === "lib-sk10");
   if (!shaft || !panel || !crossConnector || !panelSupport) return [];
   const proceduralPanelSupport = { ...panelSupport, modelAssetUrl: undefined, modelAssetName: undefined };
@@ -3329,7 +3336,7 @@ function ComponentLibraryPage({ lang, theme, parts, onPartsChange, onBackToDesig
   }, []);
   const openEdit = (part: LibraryPart) => { resetGlbExport(); setEditorView("model"); setSelectedPartId(part.id); setDraft({ ...part, usageTags: normalizeUsageTags(part.kind, part.usageTags), dimensions: { ...part.dimensions }, parallelClampParameters: part.parallelClampParameters ? { ...part.parallelClampParameters } : undefined, pegboardParameters: part.pegboardParameters ? { ...part.pegboardParameters } : undefined }); setEditorMode("edit"); };
   const openNew = () => {
-    const next: LibraryPart = { id: `lib-${Date.now()}`, model: "NEW-10-001", name: lang === "zh" ? "新组件" : "NEW COMPONENT", kind: "joint", status: "draft", material: lang === "zh" ? "不锈钢" : "STAINLESS", dimensions: { width: 30, length: 30, height: 30 }, compatibleRod: "Ø10 mm", connector: lang === "zh" ? "待定义" : "UNDEFINED", usageTags: normalizeUsageTags("joint"), source: "manual", updatedAt: new Date().toISOString().slice(0, 10), geometry: componentGeometries.crossSplitConnector };
+    const next: LibraryPart = { id: `lib-${Date.now()}`, model: "NEW-10-001", name: lang === "zh" ? "新组件" : "NEW COMPONENT", kind: "joint", status: "draft", material: lang === "zh" ? "不锈钢" : "STAINLESS", dimensions: { width: 30, length: 30, height: 30 }, compatibleRod: "Ø10 mm", connector: lang === "zh" ? "待定义" : "UNDEFINED", usageTags: normalizeUsageTags("joint"), source: "manual", updatedAt: new Date().toISOString().slice(0, 10), geometry: defaultCrossConnectorPart.geometry };
     resetGlbExport(); setEditorView("model"); setDraft(next); setEditorMode("edit");
   };
   const saveDraft = () => {
@@ -5265,7 +5272,7 @@ function ConnectorNode({
     Math.max(0.12, mmToScene(transform.sizeZ)),
   ];
   const renderedPart = useMemo<LibraryPart>(() => ({
-    ...crossSplitConnectorPart,
+    ...defaultCrossConnectorPart,
     material: material === "matteBlack" ? "黑色金属" : material === "whiteMetal" ? "白色金属" : "不锈钢",
     dimensions: { width: transform.sizeX, length: transform.sizeZ, height: transform.sizeY },
   }), [material, transform.sizeX, transform.sizeY, transform.sizeZ]);
@@ -6396,7 +6403,7 @@ function ThreeRackScene({
           active={!groupTransforming && selectedIds.includes(joint.id) && selectedId === joint.id}
           locked={exploded || lockedIds.has(joint.id)}
           snapPoints={Object.values(sceneNodes)}
-          resolveSmartSnap={smartSnapResolver(joint.id, fittedComponentPorts(crossSplitConnectorPart))}
+          resolveSmartSnap={smartSnapResolver(joint.id, fittedComponentPorts(defaultCrossConnectorPart))}
           resolvePanelSurface={panelSurfaceResolver(joint.id, renderTransform(joint.id))}
           warning={joint.warning && !resolvedRiskIds.has(joint.id)}
           showTags={showTags}
@@ -6555,7 +6562,7 @@ function ThreeRackScene({
             active={!groupTransforming && selectedIds.includes(part.id) && selectedId === part.id}
             locked={exploded || lockedIds.has(part.id)}
             snapPoints={Object.values(sceneNodes)}
-            resolveSmartSnap={smartSnapResolver(part.id, fittedComponentPorts(crossSplitConnectorPart))}
+            resolveSmartSnap={smartSnapResolver(part.id, fittedComponentPorts(defaultCrossConnectorPart))}
             resolvePanelSurface={panelSurfaceResolver(part.id, renderTransform(part.id))}
             warning={false}
             showTags={showTags}
@@ -9867,7 +9874,7 @@ export function App() {
       isolatedIds,
     }).find((segment) => segment.partId === shaftId);
     const connectorPart = addedParts.find((part) => part.id === connectorId);
-    const renderedConnector = connectorPart?.libraryPart ?? crossSplitConnectorPart;
+    const renderedConnector = connectorPart?.libraryPart ?? defaultCrossConnectorPart;
     const ports = fittedComponentPorts(renderedConnector);
     const connectorTransform = getPartTransform(transforms, connectorId);
     const connectorIsMoving = movingId === connectorId;
@@ -10373,7 +10380,7 @@ export function App() {
     );
     plan.placements.filter(({ id }) => addedParts.find((part) => part.id === id)?.kind === "joint").forEach(({ id }) => {
       const part = addedParts.find((candidate) => candidate.id === id);
-      const ports = part?.libraryPart ? fittedComponentPorts(part.libraryPart) : fittedComponentPorts(crossSplitConnectorPart);
+      const ports = part?.libraryPart ? fittedComponentPorts(part.libraryPart) : fittedComponentPorts(defaultCrossConnectorPart);
       const transform = getPartTransform(nextTransforms, id);
       const lockAxialStop = ports.some((port) => isShaftAssemblyPort(port) && port.behavior === "stop");
       const snap = findBestSmartSnap({
