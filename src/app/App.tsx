@@ -106,8 +106,32 @@ import {
 } from "../domain/model/designCoordinates";
 import { exportComponentGlb, type ComponentGlbExportResult } from "../features/components/exportComponentGlb";
 import { BomPage } from "../features/bom/BomPage";
+import { ProjectsPage } from "../features/projects/ProjectsPage";
+import { TemplatePickerDialog } from "../features/projects/TemplatePickerDialog";
+import {
+  clearCurrentProjectId,
+  clearProjectDraft,
+  mergeProjects,
+  readCurrentProjectId,
+  readProjectDraft,
+  readSavedProjects,
+  readSavedTemplates,
+  writeCurrentProjectId,
+  writeProjectDraft,
+  writeSavedProjects,
+  writeSavedTemplates,
+} from "../features/projects/projectRepository";
+import { savedTemplateDefinition } from "../features/projects/projectTemplates";
+import type {
+  ProjectTemplate,
+  SavedProject as StoredProject,
+  SavedTemplate as StoredTemplate,
+} from "../features/projects/projectTypes";
+import type { Lang } from "../shared/i18n/types";
+import { DialogFocusTrap } from "../shared/ui/DialogFocusTrap";
+import { AppNav, type AppPage } from "./AppNav";
 import { DevServerHealthNotice } from "./DevServerHealthNotice";
-import { createProjectBackup, downloadJsonFile, parseProjectBackup, PROJECT_SCHEMA_VERSION } from "../domain/projects/projectSchema";
+import { createProjectBackup, downloadJsonFile, parseProjectImport, PROJECT_SCHEMA_VERSION } from "../domain/projects/projectSchema";
 import {
   mergeDesignBounds,
   orientedBoxBounds,
@@ -137,7 +161,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ClipboardList,
   ClipboardPaste,
   CircleHelp,
   Copy,
@@ -145,7 +168,6 @@ import {
   FileJson,
   FileOutput,
   Focus,
-  FolderKanban,
   Gauge,
   Grid3X3,
   Group,
@@ -179,15 +201,12 @@ import {
   ExternalLink,
   FlipHorizontal2,
   FlipVertical2,
-  FolderOpen,
-  Clock3,
   Moon,
   Sun,
   X,
 } from "lucide-react";
 
 type StatusTone = "neutral" | "success" | "warning" | "danger";
-type Lang = "en" | "zh";
 type Theme = "dark" | "light";
 type ViewMode = "perspective" | "top" | "front" | "side";
 type RenderMode = "wireframe" | "solid" | "tags";
@@ -200,7 +219,6 @@ type TransformMode = "translate" | "rotate" | "scale";
 type MirrorAxis = "x" | "z";
 type MetalMaterial = "stainless" | "matteBlack" | "whiteMetal";
 type PartMaterial = PanelMaterial | MetalMaterial;
-type AppPage = "design" | "parts" | "projects" | "bom";
 const libraryKindOrder = ["rod", "panel", "joint"] as const satisfies readonly PartKind[];
 const libraryKindFilterOrder = ["all", ...libraryKindOrder] as const;
 const libraryKindPriority = Object.fromEntries(libraryKindOrder.map((kind, index) => [kind, index])) as Record<PartKind, number>;
@@ -307,14 +325,18 @@ async function prepareReferenceImage(file: File): Promise<string> {
     URL.revokeObjectURL(objectUrl);
   }
 }
-type SavedProject = {
-  id: string;
-  name: string;
-  version: 1 | typeof PROJECT_SCHEMA_VERSION;
-  createdAt: string;
-  updatedAt: string;
-  snapshot: EditorSnapshot;
-};
+type SavedProject = StoredProject<EditorSnapshot>;
+
+function isSavedProject(value: unknown): value is SavedProject {
+  if (!value || typeof value !== "object") return false;
+  const project = value as Partial<SavedProject>;
+  return typeof project.id === "string"
+    && typeof project.name === "string"
+    && (project.version === 1 || project.version === PROJECT_SCHEMA_VERSION)
+    && typeof project.createdAt === "string"
+    && typeof project.updatedAt === "string"
+    && Boolean(project.snapshot?.dimensions);
+}
 type SmartPlacement = { worldPoint: Vec3Tuple; anchorId?: string };
 type PartClipboardItem = {
   sourceId: string;
@@ -331,25 +353,8 @@ type FrameDimensions = {
   depth: number;
 };
 type RackTemplateId = string;
-type RackTemplateDefinition = {
-  id: RackTemplateId;
-  name: Record<Lang, string>;
-  description: Record<Lang, string>;
-  dimensions: FrameDimensions;
-  deletedPartIds: string[];
-  previewImage?: string;
-  snapshot?: EditorSnapshot;
-  custom?: boolean;
-  updatedAt?: string;
-};
-type SavedTemplate = {
-  id: string;
-  name: string;
-  version: 1;
-  createdAt: string;
-  updatedAt: string;
-  snapshot: EditorSnapshot;
-};
+type RackTemplateDefinition = ProjectTemplate<EditorSnapshot>;
+type SavedTemplate = StoredTemplate<EditorSnapshot>;
 type LocalizedText = string | Record<Lang, string>;
 
 type PartInfo = {
@@ -382,14 +387,6 @@ type ReferenceGuideContextValue = {
 };
 
 const ReferenceGuideContext = createContext<ReferenceGuideContextValue | null>(null);
-
-const navItems = [
-  { id: "projects", label: { en: "PROJECTS", zh: "项目" }, icon: FolderKanban },
-  { id: "create", label: { en: "CREATE", zh: "创建" }, icon: Copy },
-  { id: "design", label: { en: "DESIGN", zh: "设计" }, icon: Box },
-  { id: "bom", label: { en: "LIST", zh: "清单" }, icon: ClipboardList },
-  { id: "parts", label: { en: "PARTS", zh: "组件" }, icon: PackageSearch },
-];
 
 const copy = {
   en: {
@@ -821,78 +818,6 @@ const rackTemplates: RackTemplateDefinition[] = [
     previewImage: "/assets/template-previews/blank-empty-state.png",
   },
 ];
-
-const PROJECTS_STORAGE_KEY = "axisframe-projects-v1";
-const CURRENT_PROJECT_STORAGE_KEY = "axisframe-current-project-id";
-const TEMPLATES_STORAGE_KEY = "axisframe-templates-v1";
-const HISTORICAL_TEMPLATES_CLEARED_KEY = "axisframe-historical-templates-cleared-v1";
-const HISTORICAL_SEEDED_PROJECT_IDS = new Set([
-  "project-photo-coffee-rack-v1",
-  "project-stable-pegboard-stand-v2",
-  "project-dahon-folding-bike-rack-v1",
-  "project-coffee-machine-storage-rack-v1",
-  "project-floor-coat-rack-v1",
-  "project-floating-monitor-riser-v1",
-]);
-
-function readSavedProjects(): SavedProject[] {
-  try {
-    const value = window.localStorage.getItem(PROJECTS_STORAGE_KEY);
-    const parsed = value ? JSON.parse(value) as SavedProject[] : [];
-    let projects = Array.isArray(parsed)
-      ? parsed.filter((project) => (project?.version === 1 || project?.version === PROJECT_SCHEMA_VERSION) && project.snapshot)
-        .map((project) => ({ ...project, snapshot: migrateRetiredCrossClampSnapshot(project.snapshot) }))
-      : [];
-    projects = projects.filter(({ id }) => !HISTORICAL_SEEDED_PROJECT_IDS.has(id));
-    const currentProjectId = window.localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY);
-    if (currentProjectId && HISTORICAL_SEEDED_PROJECT_IDS.has(currentProjectId)) {
-      window.localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
-      window.localStorage.removeItem("axisframe-project-v1");
-    }
-    window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
-    return projects;
-  } catch {
-    return [];
-  }
-}
-
-function readSavedTemplates(): SavedTemplate[] {
-  try {
-    if (!window.localStorage.getItem(HISTORICAL_TEMPLATES_CLEARED_KEY)) {
-      window.localStorage.removeItem(TEMPLATES_STORAGE_KEY);
-      window.localStorage.setItem(HISTORICAL_TEMPLATES_CLEARED_KEY, "1");
-      return [];
-    }
-    const value = window.localStorage.getItem(TEMPLATES_STORAGE_KEY);
-    if (!value) return [];
-    const parsed = JSON.parse(value) as SavedTemplate[];
-    const templates = Array.isArray(parsed)
-      ? parsed.filter((template) => template?.version === 1 && template.snapshot)
-        .map((template) => ({ ...template, snapshot: migrateRetiredCrossClampSnapshot(template.snapshot) }))
-      : [];
-    window.localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
-    return templates;
-  } catch {
-    return [];
-  }
-}
-
-function savedTemplateDefinition(template: SavedTemplate): RackTemplateDefinition {
-  const visiblePartCount = allPartIds.length + template.snapshot.addedParts.length - template.snapshot.deletedIds.length;
-  return {
-    id: template.id,
-    name: { zh: template.name, en: template.name },
-    description: {
-      zh: `我的模板 · 保存于 ${new Date(template.updatedAt).toLocaleDateString("zh-CN")} · ${visiblePartCount} 个组件`,
-      en: `MY TEMPLATE · SAVED ${new Date(template.updatedAt).toLocaleDateString("en-US")} · ${visiblePartCount} PARTS`,
-    },
-    dimensions: template.snapshot.dimensions,
-    deletedPartIds: template.snapshot.deletedIds,
-    snapshot: template.snapshot,
-    custom: true,
-    updatedAt: template.updatedAt,
-  };
-}
 
 function sceneNodesForDimensions(dimensions: FrameDimensions): Record<string, Vec3Tuple> {
   const halfWidth = mmToScene(dimensions.width) / 2;
@@ -1547,35 +1472,6 @@ function Badge({
   tone?: StatusTone;
 }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
-}
-
-function AppNav({ lang, activePage, onNavigate, onOpenTemplates }: { lang: Lang; activePage: AppPage; onNavigate: (page: AppPage) => void; onOpenTemplates: () => void }) {
-  return (
-    <aside className="app-nav" aria-label="Primary navigation">
-      <div className="brand-mark" title="AxisFrame">
-        <img src="/assets/brand/axisframe-official-logo.png" alt="AxisFrame" />
-      </div>
-      <nav className="nav-list">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              className={`nav-item ${item.id === activePage ? "active" : ""}`}
-              key={labelFor(item.label, "en")}
-              type="button"
-              onClick={() => {
-                if (item.id === "design" || item.id === "parts" || item.id === "projects" || item.id === "bom") onNavigate(item.id);
-                if (item.id === "create") onOpenTemplates();
-              }}
-            >
-              <Icon size={19} strokeWidth={1.8} />
-              <span>{labelFor(item.label, lang)}</span>
-            </button>
-          );
-        })}
-      </nav>
-    </aside>
-  );
 }
 
 const defaultParallelClampDefinition = createParallelClampDefinition(defaultParallelClampParameters);
@@ -2651,48 +2547,6 @@ function ComponentModelPreview({ part, detailed = false, onExportObjectReady }: 
 
 const componentPreviewIds = new Set(initialLibraryParts.map(({ id }) => id));
 
-function DialogFocusTrap({ onEscape }: { onEscape: () => void }) {
-  const markerRef = useRef<HTMLSpanElement>(null);
-  const onEscapeRef = useRef(onEscape);
-  useEffect(() => { onEscapeRef.current = onEscape; }, [onEscape]);
-  useEffect(() => {
-    const dialog = markerRef.current?.parentElement;
-    if (!dialog) return;
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusableSelector = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])";
-    const focusInitial = window.requestAnimationFrame(() => {
-      const target = dialog.querySelector<HTMLElement>("[autofocus]") ?? dialog.querySelector<HTMLElement>(focusableSelector);
-      target?.focus();
-    });
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onEscapeRef.current();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = [...dialog.querySelectorAll<HTMLElement>(focusableSelector)].filter((element) => element.offsetParent !== null);
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.cancelAnimationFrame(focusInitial);
-      document.removeEventListener("keydown", handleKeyDown);
-      previousFocus?.focus();
-    };
-  }, []);
-  return <span ref={markerRef} hidden aria-hidden="true" />;
-}
-
 function ComponentListPreview({ part }: { part: LibraryPart }) {
   const [failed, setFailed] = useState(!componentPreviewIds.has(part.id));
   useEffect(() => setFailed(!componentPreviewIds.has(part.id)), [part.id]);
@@ -2764,69 +2618,6 @@ function PartPickerDialog({ parts, lang, onClose, onAdd }: { parts: LibraryPart[
             </article>
           ))}
           {filtered.length === 0 && <div className="part-picker-empty"><PackageSearch size={26} /><strong>{labels.empty}</strong></div>}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function templatePreviewImage(template: RackTemplateDefinition) {
-  return template.previewImage ?? "/assets/template-previews/blank-empty-state.png";
-}
-
-function TemplatePickerDialog({
-  templates,
-  lang,
-  onClose,
-  onSelect,
-  onDelete,
-}: {
-  templates: RackTemplateDefinition[];
-  lang: Lang;
-  onClose: () => void;
-  onSelect: (templateId: RackTemplateId) => void;
-  onDelete: (templateId: RackTemplateId) => void;
-}) {
-  const isZh = lang === "zh";
-  return (
-    <div className="modal-backdrop template-picker-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="template-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="template-picker-title" onMouseDown={(event) => event.stopPropagation()}>
-        <DialogFocusTrap onEscape={onClose} />
-        <header>
-          <div>
-            <span>{isZh ? "项目模板" : "PROJECT TEMPLATES"}</span>
-            <h2 id="template-picker-title">{isZh ? "从模板创建" : "CREATE FROM TEMPLATE"}</h2>
-            <p>{isZh ? "从空白项目开始；之后保存的新模板会显示在这里。" : "Start from a blank project. New templates you save later will appear here."}</p>
-          </div>
-          <button type="button" aria-label={isZh ? "关闭模板列表" : "CLOSE TEMPLATE LIST"} onClick={onClose}>×</button>
-        </header>
-        <div className="template-picker-list">
-          {templates.map((template, index) => {
-            const partCount = template.snapshot
-              ? allPartIds.length + template.snapshot.addedParts.length - template.snapshot.deletedIds.length
-              : allPartIds.length - template.deletedPartIds.length;
-            return (
-              <article className={template.custom ? "custom-template" : ""} data-template-id={template.id} key={template.id}>
-                <div className="template-preview">
-                  <img src={templatePreviewImage(template)} alt={`${template.name[lang]} ${isZh ? "3D 预览" : "3D PREVIEW"}`} />
-                  <span>{String(index + 1).padStart(2, "0")}</span>
-                </div>
-                <div className="template-identity">
-                  <span>{template.custom ? (isZh ? "我的模板" : "MY TEMPLATE") : (isZh ? "结构模板" : "STRUCTURE TEMPLATE")}</span>
-                  <h3>{template.name[lang]}</h3>
-                  <p>{template.description[lang]}</p>
-                </div>
-                <dl>
-                  <div><dt>{isZh ? "外形尺寸" : "DIMENSIONS"}</dt><dd>{template.dimensions.width} × {template.dimensions.depth} × {template.dimensions.height} MM</dd></div>
-                  <div><dt>{isZh ? "基础组件" : "BASE PARTS"}</dt><dd>{partCount} {isZh ? "个" : "PARTS"}</dd></div>
-                </dl>
-                <div className="template-actions">
-                  <button className="primary-button" type="button" onClick={() => onSelect(template.id)}><Layers3 size={15} />{template.id === "blank" ? (isZh ? "创建空白项目" : "CREATE BLANK PROJECT") : (isZh ? "使用模板" : "USE TEMPLATE")}</button>
-                  {template.custom && <button className="danger" type="button" aria-label={`${isZh ? "删除模板" : "DELETE TEMPLATE"} ${template.name[lang]}`} onClick={() => onDelete(template.id)}><Trash2 size={14} />{isZh ? "删除" : "DELETE"}</button>}
-                </div>
-              </article>
-            );
-          })}
         </div>
       </section>
     </div>
@@ -8475,68 +8266,13 @@ function Field({
   );
 }
 
-function ProjectsPage({
-  lang,
-  projects,
-  onOpen,
-  onDelete,
-  onCreate,
-  onExportBackup,
-  onImportBackup,
-  onBack,
-}: {
-  lang: Lang;
-  projects: SavedProject[];
-  onOpen: (project: SavedProject) => void;
-  onDelete: (projectId: string) => void;
-  onCreate: () => void;
-  onExportBackup: () => void;
-  onImportBackup: (file: File) => void;
-  onBack: () => void;
-}) {
-  const isZh = lang === "zh";
-  return (
-    <div className="projects-workspace">
-      <header className="projects-header">
-        <div>
-          <span>AXISFRAME STUDIO</span>
-          <h1>{isZh ? "本地项目" : "LOCAL PROJECTS"}</h1>
-          <p>{isZh ? "项目以 JSON 快照保存在当前浏览器，可随时恢复继续编辑。" : "Projects are stored as JSON snapshots in this browser and can be reopened at any time."}</p>
-        </div>
-        <div>
-          <button className="icon-button" type="button" onClick={onBack}><ChevronLeft size={16} />{isZh ? "返回设计器" : "BACK TO DESIGN"}</button>
-          <button className="icon-button" type="button" onClick={onExportBackup}><Download size={16} />{isZh ? "备份全部" : "BACK UP ALL"}</button>
-          <label className="icon-button projects-import-button"><FolderOpen size={16} />{isZh ? "恢复备份" : "RESTORE"}<input type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) onImportBackup(file); event.target.value = ""; }} /></label>
-          <button className="primary-button" type="button" onClick={onCreate}><Plus size={16} />{isZh ? "新建项目" : "NEW PROJECT"}</button>
-        </div>
-      </header>
-      <main className="projects-main">
-        <div className="projects-summary"><FolderKanban size={18} /><strong>{projects.length}</strong><span>{isZh ? "个历史项目" : "SAVED PROJECTS"}</span></div>
-        {projects.length === 0 ? (
-          <section className="projects-empty"><FolderOpen size={32} /><h2>{isZh ? "还没有保存的项目" : "NO SAVED PROJECTS"}</h2><p>{isZh ? "回到设计器完成第一个设计，然后点击保存并为项目命名。" : "Build your first design, then save it with a project name."}</p><button className="primary-button" type="button" onClick={onCreate}>{isZh ? "开始新项目" : "START A PROJECT"}</button></section>
-        ) : (
-          <div className="project-list">
-            {projects.map((project) => (
-              <article className="project-row" key={project.id}>
-                <div className="project-row-icon"><Box size={21} /></div>
-                <div className="project-row-name"><h2>{project.name}</h2><small>{project.snapshot.addedParts.length + allPartIds.length - project.snapshot.deletedIds.length} {isZh ? "个组件" : "PARTS"}</small></div>
-                <div className="project-row-time"><Clock3 size={14} /><span>{new Date(project.updatedAt).toLocaleString(isZh ? "zh-CN" : "en-US", { hour12: false })}</span></div>
-                <button type="button" onClick={() => onOpen(project)}><FolderOpen size={15} />{isZh ? "打开" : "OPEN"}</button>
-                <button className="danger" type="button" aria-label={`${isZh ? "删除" : "DELETE"} ${project.name}`} onClick={() => onDelete(project.id)}><Trash2 size={15} /></button>
-              </article>
-            ))}
-          </div>
-        )}
-      </main>
-    </div>
-  );
-}
-
 export function App() {
   const [activePage, setActivePage] = useState<AppPage>("projects");
   const [libraryParts, setLibraryParts] = useState<LibraryPart[]>(initialLibraryParts);
-  const [savedProjects, setSavedProjects] = useState<SavedProject[]>(readSavedProjects);
-  const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>(readSavedTemplates);
+  const [savedProjects, setSavedProjects] = useState<SavedProject[]>(() =>
+    readSavedProjects(migrateRetiredCrossClampSnapshot));
+  const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>(() =>
+    readSavedTemplates(migrateRetiredCrossClampSnapshot));
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [currentProjectName, setCurrentProjectName] = useState("未命名项目");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -8585,7 +8321,7 @@ export function App() {
   const [alignmentNotice, setAlignmentNotice] = useState("");
   const clipboardPasteCount = useRef(0);
   const availableTemplates = useMemo(
-    () => [...savedTemplates.map(savedTemplateDefinition), ...rackTemplates],
+    () => [...savedTemplates.map((template) => savedTemplateDefinition(template, allPartIds.length)), ...rackTemplates],
     [savedTemplates],
   );
   const [focusRequest, setFocusRequest] = useState(0);
@@ -8807,8 +8543,8 @@ export function App() {
     }
     setCurrentProjectId(null);
     setCurrentProjectName(lang === "zh" ? "未命名项目" : "UNTITLED PROJECT");
-    window.localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
-    window.localStorage.removeItem("axisframe-project-v1");
+    clearCurrentProjectId();
+    clearProjectDraft();
     setUndoStack([]);
     setRedoStack([]);
     setSaveStatus("unsaved");
@@ -8837,11 +8573,10 @@ export function App() {
         updatedAt: now,
         snapshot,
       };
-      const next = [project, ...savedProjects.filter((candidate) => candidate.id !== project.id)]
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-      window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next));
-      window.localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, project.id);
-      window.localStorage.setItem("axisframe-project-v1", JSON.stringify(snapshot));
+      const next = mergeProjects(savedProjects, [project]);
+      writeSavedProjects(next);
+      writeCurrentProjectId(project.id);
+      writeProjectDraft(snapshot);
       setSavedProjects(next);
       setCurrentProjectId(project.id);
       setCurrentProjectName(project.name);
@@ -8865,7 +8600,7 @@ export function App() {
       snapshot: captureSnapshot(),
     };
     const next = [template, ...savedTemplates];
-    window.localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(next));
+    writeSavedTemplates(next);
     setSavedTemplates(next);
     setSaveDialogOpen(false);
     setTemplateNotice(lang === "zh" ? `模板“${name}”已保存` : `TEMPLATE “${name}” SAVED`);
@@ -8873,14 +8608,14 @@ export function App() {
 
   const deleteSavedTemplate = (templateId: RackTemplateId) => {
     const next = savedTemplates.filter((template) => template.id !== templateId);
-    window.localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(next));
+    writeSavedTemplates(next);
     setSavedTemplates(next);
   };
 
   useEffect(() => {
-    const projects = readSavedProjects();
+    const projects = readSavedProjects(migrateRetiredCrossClampSnapshot);
     setSavedProjects(projects);
-    const currentId = window.localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY);
+    const currentId = readCurrentProjectId();
     const currentProject = projects.find((project) => project.id === currentId);
     if (currentProject) {
       applySnapshot(currentProject.snapshot);
@@ -8889,11 +8624,11 @@ export function App() {
       setSaveStatus("saved");
       return;
     }
-    const saved = window.localStorage.getItem("axisframe-project-v1");
+    const saved = readProjectDraft<EditorSnapshot>();
     if (!saved) return;
     try {
-      const migrated = migrateRetiredCrossClampSnapshot(JSON.parse(saved) as EditorSnapshot);
-      window.localStorage.setItem("axisframe-project-v1", JSON.stringify(migrated));
+      const migrated = migrateRetiredCrossClampSnapshot(saved);
+      writeProjectDraft(migrated);
       applySnapshot(migrated);
       setSaveStatus("saved");
     } catch {
@@ -8907,7 +8642,7 @@ export function App() {
       setSaveStatus("saving");
       try {
         const snapshot = captureSnapshot();
-        window.localStorage.setItem("axisframe-project-v1", JSON.stringify(snapshot));
+        writeProjectDraft(snapshot);
         if (currentProjectId) {
           const existing = savedProjects.find((project) => project.id === currentProjectId);
           if (existing) {
@@ -8916,9 +8651,8 @@ export function App() {
               updatedAt: new Date().toISOString(),
               snapshot,
             };
-            const next = [updatedProject, ...savedProjects.filter((project) => project.id !== currentProjectId)]
-              .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-            window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next));
+            const next = mergeProjects(savedProjects, [updatedProject]);
+            writeSavedProjects(next);
             setSavedProjects(next);
           }
         }
@@ -8934,7 +8668,7 @@ export function App() {
     applySnapshot(project.snapshot);
     setCurrentProjectId(project.id);
     setCurrentProjectName(project.name);
-    window.localStorage.setItem(CURRENT_PROJECT_STORAGE_KEY, project.id);
+    writeCurrentProjectId(project.id);
     setSelectedIds([]);
     setUndoStack([]);
     setRedoStack([]);
@@ -8950,10 +8684,10 @@ export function App() {
   const deleteSavedProject = (projectId: string) => {
     const next = savedProjects.filter((project) => project.id !== projectId);
     setSavedProjects(next);
-    window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next));
+    writeSavedProjects(next);
     if (currentProjectId === projectId) {
       setCurrentProjectId(null);
-      window.localStorage.removeItem(CURRENT_PROJECT_STORAGE_KEY);
+      clearCurrentProjectId();
       setSaveStatus("unsaved");
     }
   };
@@ -8987,28 +8721,39 @@ export function App() {
 
   const importProjectBackup = async (file: File) => {
     try {
-      const backup = parseProjectBackup(await file.text(), (value): value is SavedProject => {
-        if (!value || typeof value !== "object") return false;
-        const project = value as Partial<SavedProject>;
-        return typeof project.id === "string"
-          && typeof project.name === "string"
-          && (project.version === 1 || project.version === PROJECT_SCHEMA_VERSION)
-          && Boolean(project.snapshot?.dimensions);
-      });
+      const backup = parseProjectImport(await file.text(), isSavedProject);
       const imported = backup.projects.map((project) => ({
         ...project,
         version: PROJECT_SCHEMA_VERSION,
         snapshot: migrateRetiredCrossClampSnapshot(project.snapshot),
       } satisfies SavedProject));
-      const importedIds = new Set(imported.map(({ id }) => id));
-      const next = [...imported, ...savedProjects.filter(({ id }) => !importedIds.has(id))]
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-      window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next));
+      const next = mergeProjects(savedProjects, imported);
+      writeSavedProjects(next);
       setSavedProjects(next);
       setTemplateNotice(lang === "zh" ? `已恢复 ${imported.length} 个项目` : `RESTORED ${imported.length} PROJECTS`);
     } catch {
       setTemplateNotice(lang === "zh" ? "恢复失败：JSON 格式或版本不受支持" : "RESTORE FAILED: UNSUPPORTED JSON OR VERSION");
     }
+  };
+
+  const importProjectFromCreator = async (file: File) => {
+    const backup = parseProjectImport(await file.text(), isSavedProject);
+    if (backup.projects.length === 0) throw new Error("EMPTY_PROJECT_IMPORT");
+    const imported = backup.projects.map((project) => ({
+      ...project,
+      version: PROJECT_SCHEMA_VERSION,
+      snapshot: migrateRetiredCrossClampSnapshot(project.snapshot),
+    } satisfies SavedProject));
+    const next = mergeProjects(savedProjects, imported);
+    writeSavedProjects(next);
+    setSavedProjects(next);
+    openSavedProject(imported[0]);
+    setTemplatePickerOpen(false);
+    setTemplateNotice(
+      lang === "zh"
+        ? `已导入 ${imported.length} 个项目，正在编辑「${imported[0].name}」`
+        : `IMPORTED ${imported.length} PROJECTS. EDITING "${imported[0].name}"`,
+    );
   };
 
   useEffect(() => {
@@ -10899,6 +10644,7 @@ export function App() {
         <ProjectsPage
           lang={lang}
           projects={savedProjects}
+          builtInPartCount={allPartIds.length}
           onOpen={openSavedProject}
           onDelete={deleteSavedProject}
           onCreate={openTemplateCreator}
@@ -11115,7 +10861,15 @@ export function App() {
         <PartPickerDialog parts={libraryParts} lang={lang} onClose={closePartPicker} onAdd={addLibraryPart} />
       )}
       {templatePickerOpen && (
-        <TemplatePickerDialog templates={availableTemplates} lang={lang} onClose={() => setTemplatePickerOpen(false)} onSelect={loadRackTemplate} onDelete={deleteSavedTemplate} />
+        <TemplatePickerDialog
+          templates={availableTemplates}
+          builtInPartCount={allPartIds.length}
+          lang={lang}
+          onClose={() => setTemplatePickerOpen(false)}
+          onSelect={loadRackTemplate}
+          onDelete={deleteSavedTemplate}
+          onImportProject={importProjectFromCreator}
+        />
       )}
       {saveDialogOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setSaveDialogOpen(false)}>
