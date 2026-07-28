@@ -2,7 +2,14 @@ export type OrderPartKind = "joint" | "rod" | "panel";
 export type OrderPart = {
   id: string;
   kind: OrderPartKind;
-  libraryPart?: { model: string; source?: string; name?: string };
+  libraryPart?: {
+    id?: string;
+    model: string;
+    source?: string;
+    name?: string;
+    compatibleRod?: string;
+    dimensions?: { width: number; length: number; height: number };
+  };
 };
 export type OrderDimensions = { width: number; height: number; depth: number };
 export type OrderTransform = {
@@ -17,13 +24,14 @@ export type OrderDataInput = {
   parts: OrderPart[];
   transforms: Record<string, OrderTransform>;
   materials: Record<string, string>;
+  panelCutouts?: Record<string, Array<{ diameterMm: number }>>;
   deletedIds: ReadonlySet<string>;
   unresolvedRiskIds: string[];
 };
 
 export type RodLine = { id: string; diameter: number; length: number; material: string };
-export type PanelLine = { id: string; length: number; width: number; thickness: number; material: string };
-export type HardwareLine = { id: string; sku: string; material: string; fastener: string; source: string };
+export type PanelLine = { id: string; length: number; width: number; thickness: number; material: string; drilling?: string };
+export type HardwareLine = { id: string; sku: string; specification: string; material: string; fastener: string; source: string };
 export type SummaryLine = {
   category: string;
   sku: string;
@@ -90,17 +98,28 @@ export function buildOrderData(input: OrderDataInput) {
       rods.push({ id: part.id, diameter: roundMm(transform.sizeY), length: roundMm(baseLength * transform.sizeX / 100), material });
     } else if (part.kind === "panel") {
       const hasCustomTransform = Boolean(input.transforms[part.id]);
-      panels.push({
+      const cutouts = input.panelCutouts?.[part.id] ?? [];
+      const panel: PanelLine = {
         id: part.id,
         length: roundMm(hasCustomTransform ? transform.sizeX : Math.max(100, input.dimensions.width - 20)),
         width: roundMm(hasCustomTransform ? transform.sizeZ : Math.max(100, input.dimensions.depth - 15)),
         thickness: roundMm(transform.sizeY),
         material,
-      });
+      };
+      if (cutouts.length > 0) {
+        const diameters = [...new Set(cutouts.map(({ diameterMm }) => roundMm(diameterMm)))];
+        panel.drilling = `开孔 ${cutouts.length} × ${diameters.map((diameter) => `Ø${diameter}`).join(" / ")} mm`;
+      }
+      panels.push(panel);
     } else {
+      const componentDimensions = part.libraryPart?.dimensions;
+      const envelope = componentDimensions
+        ? `${roundMm(componentDimensions.width)} × ${roundMm(componentDimensions.length)} × ${roundMm(componentDimensions.height)} mm`
+        : `${roundMm(transform.sizeX)} × ${roundMm(transform.sizeZ)} × ${roundMm(transform.sizeY)} mm`;
       hardware.push({
         id: part.id,
         sku: part.libraryPart?.model ?? "EQUAL-CROSS-10-10",
+        specification: [part.libraryPart?.compatibleRod, envelope].filter(Boolean).join(" · "),
         material,
         fastener: "按组件规格",
         source: sourceFor(part),
@@ -133,7 +152,7 @@ export function buildOrderData(input: OrderDataInput) {
   panels.forEach((panel) => addSummary({
     category: "层板定制",
     sku: "PANEL-CUSTOM",
-    specification: `${panel.length} × ${panel.width} × ${panel.thickness} mm`,
+    specification: [`${panel.length} × ${panel.width} × ${panel.thickness} mm`, panel.drilling].filter(Boolean).join(" · "),
     material: panel.material,
     unit: "块",
     note: panel.material.includes("亚克力") ? "边缘抛光，双面保护膜" : "纹理沿长度方向，四边精修",
@@ -143,7 +162,7 @@ export function buildOrderData(input: OrderDataInput) {
   hardware.forEach((item) => addSummary({
     category: "连接五金",
     sku: item.sku,
-    specification: "按组件端口规格",
+    specification: item.specification,
     material: item.material,
     unit: "个",
     note: `含 ${item.fastener} 紧固件`,

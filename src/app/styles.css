@@ -1749,6 +1749,54 @@ button {
   white-space: nowrap;
 }
 
+.equal-bore-swivel-angle-controls {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+}
+
+.equal-bore-swivel-angle-controls legend {
+  padding: 0 6px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.equal-bore-swivel-angle-controls label {
+  display: grid;
+  grid-template-columns: 84px minmax(72px, 1fr) 66px 10px;
+  align-items: center;
+  gap: 8px;
+}
+
+.equal-bore-swivel-angle-controls label > span,
+.equal-bore-swivel-angle-controls p {
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.equal-bore-swivel-angle-controls input[type="range"] {
+  accent-color: var(--ink);
+}
+
+.equal-bore-swivel-angle-controls input[type="number"] {
+  min-width: 0;
+  height: 32px;
+}
+
+.equal-bore-swivel-angle-controls em {
+  font-size: 12px;
+  font-style: normal;
+}
+
+.equal-bore-swivel-angle-controls p {
+  margin: 0;
+  line-height: 1.5;
+}
+
 .numeric-grid.shaft-parameter-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -3026,14 +3074,18 @@ button.dimension-label:focus-visible {
 }
 
 .reference-image-preview.has-image {
-  padding: 8px;
+  box-sizing: border-box;
+  height: auto;
+  min-height: 0;
+  max-height: min(62vh, 720px);
+  padding: 0;
 }
 
 .reference-image-preview img {
   display: block;
-  width: auto;
+  width: 100%;
   max-width: 100%;
-  height: auto;
+  height: 100%;
   max-height: 100%;
   object-fit: contain;
   object-position: center;
@@ -4633,6 +4685,47 @@ button.dimension-label:focus-visible {
   color: var(--muted);
   font-size: 7px;
   text-transform: uppercase;
+}
+
+.pair-shaft-axis-control {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 3px;
+  border-left: 1px solid var(--line);
+  padding-left: 5px;
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.pair-shaft-axis-control input {
+  width: 42px;
+  height: 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  padding: 0 4px;
+  background: rgb(255 255 255 / 5%);
+  color: #ffffff;
+  font: inherit;
+  text-align: right;
+}
+
+.pair-shaft-axis-control b {
+  margin-right: 1px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.pair-shaft-axis-control em {
+  max-width: 78px;
+  overflow: hidden;
+  color: var(--success);
+  font-size: 7px;
+  font-style: normal;
+  text-overflow: ellipsis;
 }
 
 .pair-constraint-toolbar button {
@@ -6557,6 +6650,10 @@ button.dimension-label:focus-visible {
 
   .reference-image-preview {
     height: 160px;
+  }
+
+  .reference-image-preview.has-image {
+    height: auto;
   }
 
   .canvas-add-component-fab {

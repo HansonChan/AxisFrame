@@ -1,0 +1,44 @@
+.precision-rotation-tick-label,
+.precision-rotation-readout {
+  pointer-events: none;
+  user-select: none;
+}
+
+.precision-rotation-tick-label {
+  color: var(--axis-color);
+  font: 700 8px/1 "SFMono-Regular", Consolas, monospace;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 85%);
+}
+
+.precision-rotation-readout {
+  display: grid;
+  min-width: 88px;
+  justify-items: center;
+  gap: 2px;
+  border: 1px solid color-mix(in srgb, var(--axis-color) 65%, transparent);
+  border-radius: 4px;
+  padding: 7px 9px;
+  background: rgb(15 15 14 / 88%);
+  color: #f8f7f2;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 28%);
+  backdrop-filter: blur(8px);
+}
+
+.precision-rotation-readout span,
+.precision-rotation-readout small {
+  color: var(--axis-color);
+  font: 800 7px/1.2 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.08em;
+}
+
+.precision-rotation-readout strong {
+  font: 800 15px/1 "SFMono-Regular", Consolas, monospace;
+}
+
+.precision-rotation-readout.snapped {
+  border-color: #f6c849;
+}
+
+.precision-rotation-readout.snapped small {
+  color: #f6c849;
+}

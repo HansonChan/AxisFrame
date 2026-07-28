@@ -6,6 +6,7 @@ export type SpatialOrientation = "horizontal" | "vertical" | "diagonal";
 export type AssemblyPort = {
   id: string;
   axis: "x" | "y" | "z";
+  direction?: Vec3;
   position: Vec3;
   diameter: number;
   kind?: PortKind;
@@ -111,6 +112,10 @@ const normalize = (v: Vec3): Vec3 => {
   return magnitude > 1e-8 ? scale(v, 1 / magnitude) : [0, 0, 0];
 };
 
+export function portLocalDirection(port: AssemblyPort): Vec3 {
+  return normalize(port.direction ?? axisVectors[port.axis]);
+}
+
 export function classifySpatialOrientation(vector: Vec3, cardinalTolerance = 0.85): SpatialOrientation {
   const direction = normalize(vector);
   const verticalAmount = Math.abs(direction[1]);
@@ -212,11 +217,11 @@ export function findBestSmartSnap({
 
   const proposedPortOrientations = new Map(shaftPorts.map((port) => [
     port.id,
-    classifySpatialOrientation(rotateVector(axisVectors[port.axis], proposedRotation)),
+    classifySpatialOrientation(rotateVector(portLocalDirection(port), proposedRotation)),
   ]));
   let best: (SmartSnapResult & { score: number; matchCount: number; directionMatchCount: number }) | null = null;
   for (const primaryPort of shaftPorts) {
-    const rotatedPortAxis = normalize(rotateVector(axisVectors[primaryPort.axis], rotation));
+    const rotatedPortAxis = normalize(rotateVector(portLocalDirection(primaryPort), rotation));
     const rotatedPortOffset = rotateVector(scale(primaryPort.position, localScale), rotation);
     const proposedPortPosition = add(proposedPosition, rotatedPortOffset);
     for (const shaft of shafts) {
@@ -237,7 +242,7 @@ export function findBestSmartSnap({
         const matches: AssemblyConnection[] = [];
 
         for (const port of shaftPorts) {
-          const worldAxis = normalize(rotateVector(axisVectors[port.axis], rotation));
+          const worldAxis = normalize(rotateVector(portLocalDirection(port), rotation));
           const worldPosition = add(solvedPosition, rotateVector(scale(port.position, localScale), rotation));
           let closestMatch: { shaft: ShaftSegment; t: number; gap: number } | null = null;
           for (const candidateShaft of shafts) {
