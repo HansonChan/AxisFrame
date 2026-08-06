@@ -4,18 +4,13 @@ import { Suspense, createContext, useCallback, useContext, useEffect, useLayoutE
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { findBestShaftPanelHoleSnap, findBestSmartSnap, isShaftAssemblyPort, portLocalDirection, snapAxialStopToPanelSurface, snapConnectorToConnectorSurface, snapConnectorToPanelSurface, type AssemblyConnection, type AssemblyPort, type ConnectorContactTarget, type ConnectorPanelSurfaceContact, type PanelContactTarget, type PanelHoleTarget, type PortBehavior, type PortKind, type SmartSnapResult, type ShaftSegment } from "../domain/assembly/assembly";
+import { findBestShaftPanelHoleSnap, findBestSmartSnap, findBestThreadedPortMate, isShaftAssemblyPort, isThreadedStemPort, portLocalDirection, snapAxialStopToPanelSurface, snapConnectorToConnectorSurface, snapConnectorToPanelSurface, type AssemblyConnection, type AssemblyPort, type ConnectorContactTarget, type ConnectorPanelSurfaceContact, type PanelContactTarget, type PanelHoleTarget, type PortBehavior, type PortKind, type SmartSnapResult, type ShaftSegment } from "../domain/assembly/assembly";
 import { alignPairPosition, findReferenceAlignment, retargetMovingPartForFixedAnchor, type AlignmentAxis, type ReferenceAlignment } from "../domain/assembly/pairConstraints";
-import {
-  copyPreciseRelationsForPartMap,
-  createShaftBoreRelation,
-  createSurfaceRelation,
-  preciseRelationFailureMessage,
-  replacePairRelation, solveShaftAxisMove, solveSurfaceRelation, type BoxAssemblyPart, type PreciseAssemblyRelation,
-} from "../domain/assembly/preciseRelations";
+import { copyPreciseRelationsForPartMap, createShaftBoreRelation, createSurfaceRelation, createThreadBoreRelation, preciseRelationFailureMessage, replacePairRelation, solveShaftAxisMove, solveSurfaceRelation, type BoxAssemblyPart, type PreciseAssemblyRelation } from "../domain/assembly/preciseRelations";
 import { planSmartRackAlignment, type SmartAlignAxis, type SmartAlignPart } from "../domain/assembly/smartRackAlignment";
 import { analyzeStructure, estimatePartMassKg, STRUCTURAL_MATERIAL_SPECS, type PanelMountConnection, type StructuralAnalysis, type StructuralIssue, type StructuralMaterial, type StructuralPart } from "../domain/assembly/structuralAnalysis";
 import { componentSceneSize, mmToScene, normalizedComponentSelectionSize } from "../domain/components/componentBounds";
+import { brakeCasterSpecification, createBrakeCasterDefinition } from "../domain/components/brakeCaster";
 import { getCachedHollowComponentGeometry, hasBooleanCutouts } from "../domain/components/componentBooleanGeometry";
 import { resolveShaftInstanceParameters } from "../domain/components/shaftInstance";
 import { shaftPlacementRotation, type ShaftPlacementOrientation } from "../domain/components/shaftPlacement";
@@ -265,7 +260,7 @@ type LibraryPart = ComponentDefinition<ComponentGeometry> & {
     cornerRadius: number;
   };
 };
-type ComponentPrimitive = { shape: "box" | "roundedBox" | "cylinder" | "ring"; size: Vec3Tuple; position: Vec3Tuple; rotation?: Vec3Tuple; radius?: number; appearance?: "solid" | "cutout" | "post-cutout"; feature?: "drilled-hole" | "shaft-bore" | "pivot-male" | "pivot-female" | "joint-seam" };
+type ComponentPrimitive = { shape: "box" | "roundedBox" | "cylinder" | "ring"; size: Vec3Tuple; position: Vec3Tuple; rotation?: Vec3Tuple; radius?: number; appearance?: "solid" | "cutout" | "post-cutout"; feature?: "drilled-hole" | "shaft-bore" | "pivot-male" | "pivot-female" | "joint-seam"; finish?: "metal" | "rubber" | "dark-metal" };
 type ComponentPort = AssemblyPort & {
   kind: PortKind;
   behavior: PortBehavior;
@@ -273,7 +268,7 @@ type ComponentPort = AssemblyPort & {
   capacity: number;
 };
 type ComponentGeometry = { primitives: ComponentPrimitive[]; ports: ComponentPort[] };
-type RawComponentGeometry = { primitives: ComponentPrimitive[]; ports: Array<Pick<AssemblyPort, "id" | "axis" | "direction" | "position" | "diameter">> };
+type RawComponentGeometry = { primitives: ComponentPrimitive[]; ports: Array<Pick<AssemblyPort, "id" | "axis" | "direction" | "position" | "diameter" | "kind" | "behavior" | "toleranceMm" | "capacity">> };
 
 type PartTransform = ComponentTransform;
 type EditorSnapshot = {
@@ -1487,6 +1482,7 @@ const defaultEqualBoreSwivelClampDefinition = createEqualBoreSwivelClampDefiniti
 const defaultRoundFixedBaseDefinition = createRoundFixedBaseDefinition(defaultRoundFixedBaseVariant.innerDiameter);
 const defaultVerticalFixedBaseDefinition = createVerticalFixedBaseDefinition(defaultVerticalFixedBaseVariant.model);
 const defaultShaftStopDefinition = createShaftStopDefinition(defaultShaftStopParameters);
+const defaultBrakeCasterDefinition = createBrakeCasterDefinition();
 
 const rawComponentGeometries = {
   singleBoreFixedClamp: { primitives: [{ shape: "box", size: [1.7, 2.1, 1.25], position: [0, 0, 0] }, { shape: "cylinder", size: [0.72, 1.42, 0.72], position: [0, -0.2, 0], rotation: [90, 0, 0], appearance: "cutout" }, { shape: "box", size: [0.16, 1.08, 1.3], position: [0, 0.74, 0], appearance: "cutout" }, { shape: "cylinder", size: [0.25, 0.5, 0.25], position: [-0.43, 1.12, 0] }, { shape: "cylinder", size: [0.25, 0.5, 0.25], position: [0.43, 1.12, 0] }, { shape: "cylinder", size: [0.2, 1.78, 0.2], position: [0, 0.53, 0.35], rotation: [0, 0, 90], appearance: "cutout" }, { shape: "cylinder", size: [0.2, 1.78, 0.2], position: [0, -0.68, 0.35], rotation: [0, 0, 90], appearance: "cutout" }], ports: [{ id: "SHAFT", axis: "z", position: [0, -0.2, 0], diameter: 10 }, { id: "MOUNT-TOP", axis: "x", position: [0, 0.53, 0.35], diameter: 5 }, { id: "MOUNT-BOTTOM", axis: "x", position: [0, -0.68, 0.35], diameter: 5 }, { id: "CLAMP-L", axis: "y", position: [-0.43, 1.12, 0], diameter: 4 }, { id: "CLAMP-R", axis: "y", position: [0.43, 1.12, 0], diameter: 4 }] },
@@ -1501,12 +1497,13 @@ const rawComponentGeometries = {
   verticalFixedBase: { primitives: defaultVerticalFixedBaseDefinition.primitives, ports: defaultVerticalFixedBaseDefinition.ports },
   shaftSupport: { primitives: [{ shape: "box", size: [1.8, 0.28, 1.25], position: [0, -0.62, 0] }, { shape: "box", size: [1.05, 1.25, 0.78], position: [0, 0, 0] }, { shape: "cylinder", size: [0.42, 1.4, 0.42], position: [0, 0.12, 0], rotation: [90, 0, 0] }], ports: [{ id: "SHAFT", axis: "z", position: [0, 0.12, 0], diameter: 10 }, { id: "MOUNT", axis: "y", position: [0, -0.76, 0], diameter: 0 }] },
   fixedRing: { primitives: defaultShaftStopDefinition.primitives, ports: defaultShaftStopDefinition.ports },
+  brakeCaster: { primitives: defaultBrakeCasterDefinition.primitives, ports: defaultBrakeCasterDefinition.ports },
 } satisfies Record<string, RawComponentGeometry>;
 
 function upgradeComponentPort(geometryId: string, port: RawComponentGeometry["ports"][number]): ComponentPort {
   const id = port.id.toUpperCase();
   const shaftInterface = id.startsWith("P") || id.includes("SHAFT") || id.includes("SLIDE") || id === "BORE";
-  const kind: PortKind = shaftInterface
+  const kind: PortKind = port.kind ?? (shaftInterface
     ? "shaft-bore"
     : id === "START" || id === "END"
       ? "shaft-end"
@@ -1514,18 +1511,18 @@ function upgradeComponentPort(geometryId: string, port: RawComponentGeometry["po
         ? "mount"
         : id.includes("CLAMP") || id.includes("LOCK")
           ? "fastener"
-          : "support";
-  const behavior: PortBehavior = id.includes("SLIDE")
+          : "support");
+  const behavior: PortBehavior = port.behavior ?? (id.includes("SLIDE")
     ? "slide"
     : geometryId === "fixedRing"
       ? "stop"
-      : "fixed";
+      : "fixed");
   return {
     ...port,
     kind,
     behavior,
-    toleranceMm: kind === "shaft-bore" ? 0.25 : 0.1,
-    capacity: 1,
+    toleranceMm: port.toleranceMm ?? (kind === "shaft-bore" || kind === "shaft-end" ? 0.25 : 0.1),
+    capacity: port.capacity ?? 1,
   };
 }
 
@@ -1681,6 +1678,7 @@ const initialLibraryParts: LibraryPart[] = [
   { id: "lib-pegboard-600", model: "PEGBOARD-600-450-P25", name: "孔阵洞洞板", kind: "panel", status: "ready", material: "原木色纤维板", defaultPanelMaterial: "oak", dimensions: { width: 600, length: 450, height: 12 }, pegboardParameters: defaultPegboardParameters, compatibleRod: "四点固定夹安装", connector: "4 × M5 安装位 / 25 mm 孔距", usageTags: ["pegboard-fixture", "wall-mount"], source: "preset", updatedAt: "2026-07-19", geometry: componentGeometries.pegboard },
   { id: "lib-base-10", model: roundFixedBaseModel(defaultRoundFixedBaseVariant.innerDiameter), name: "圆形固定底座", kind: "joint", status: "ready", material: "不锈钢", dimensions: { width: 49, length: 49, height: 20 }, roundFixedBaseInnerDiameter: defaultRoundFixedBaseVariant.innerDiameter, variantCount: roundFixedBaseVariants.length, compatibleRod: `Ø${defaultRoundFixedBaseVariant.innerDiameter} mm`, connector: `垂直单孔 / 4 × Ø${defaultRoundFixedBaseVariant.mountingHoleDiameter} / PCD ${defaultRoundFixedBaseVariant.mountingHolePcd} mm`, usageTags: ["base-foot", "frame-structure"], source: "three-view", updatedAt: "2026-07-22", geometry: componentGeometries.base, referenceLabel: "用户提供 8 / 10 / 12 mm 三组尺寸图", referenceUrl: "/assets/references/round-fixed-base/inner-10.png" },
   { id: "lib-sk10", model: defaultVerticalFixedBaseVariant.model, name: "立式固定座", kind: "joint", status: "ready", material: "不锈钢", dimensions: { width: 42, length: 14, height: 32.8 }, verticalFixedBaseShaftDiameter: defaultVerticalFixedBaseVariant.shaftDiameter, variantCount: verticalFixedBaseVariants.length, compatibleRod: `Ø${defaultVerticalFixedBaseVariant.shaftDiameter} mm`, connector: `夹紧支撑 / 2 × Ø${defaultVerticalFixedBaseVariant.s} 底面安装 / 孔距 ${defaultVerticalFixedBaseVariant.b} mm`, usageTags: ["panel-support", "base-foot"], source: "three-view", updatedAt: "2026-07-22", geometry: componentGeometries.verticalFixedBase, referenceLabel: "用户提供结构图及 SK8–SK16 五组尺寸表", referenceUrl: "/assets/references/vertical-fixed-base/size-table.png" },
+  { id: "lib-brake-caster-m8", model: brakeCasterSpecification.model, name: "2 寸丝杆刹车万向轮", kind: "joint", status: "review", material: "不锈钢 / 橡胶", dimensions: { width: 68, length: 29, height: 86 }, compatibleRod: "M8 螺纹杆 / Ø8 mm 连接孔", connector: "M8 × 20 mm 顶部螺纹连接", usageTags: ["base-foot"], source: "manual", updatedAt: "2026-08-06", geometry: componentGeometries.brakeCaster, referenceLabel: "用户提供实物尺寸图：轮 Ø50 × 17 mm、安装高 66 mm、M8 × 20 mm；支架与刹车踏板包络为图片估算", referenceUrl: "/assets/references/brake-caster/m8-2inch-reference.png" },
   { id: "lib-shf10", model: "SHF10", name: "法兰式光轴支座", kind: "joint", status: "review", material: "不锈钢", dimensions: { width: 43, length: 10, height: 24 }, compatibleRod: "Ø10 mm", connector: "夹紧支撑 / 法兰安装", usageTags: ["wall-mount", "panel-support"], source: "manual", updatedAt: "2026-07-12", geometry: componentGeometries.shaftSupport, referenceLabel: "Tuli SHF10 STEP", referenceUrl: "https://www.tuli-shop.com/linear-shaft-support-shf-10", modelAssetUrl: "/assets/components/shaft-supports/SHF10/SHF10.glb", modelAssetName: "SHF10.step" },
   { id: "lib-fixed-ring-10", model: shaftStopModel(defaultShaftStopParameters), name: "限位器", kind: "joint", status: "ready", material: "不锈钢", dimensions: { width: 30, length: 30, height: 10 }, parameters: defaultShaftStopParameters, variantCount: shaftStopVariants.length, compatibleRod: "Ø10 mm", connector: "轴向限位 / 开口锁紧 / M4", usageTags: ["axial-stop"], source: "three-view", updatedAt: "2026-07-22", geometry: componentGeometries.fixedRing, referenceLabel: "用户提供结构图及 18 个库存尺寸组合", referenceUrl: "/assets/references/shaft-stop/size-table.png" },
 ];
@@ -1862,7 +1860,7 @@ function ComponentPortMarkers({
   showLabels?: boolean;
   unitsPerMm?: number;
 }) {
-  const shaftPorts = ports.filter(isShaftAssemblyPort);
+  const shaftPorts = ports.filter((port) => isShaftAssemblyPort(port) || isThreadedStemPort(port));
   return (
     <>
       {shaftPorts.map((port) => {
@@ -2018,30 +2016,13 @@ function ComponentModel({ part, displayMode = "preview", onObjectReady }: { part
       : null,
     [part.parameters, renderPrimitives],
   );
-  const surfaceMaterial = () => isAcrylic
-    ? (
-      <meshPhysicalMaterial
-        color={color}
-        map={acrylicTexture ?? undefined}
-        roughnessMap={acrylicTexture ?? undefined}
-        metalness={acrylicLiquidGlassMaterial.metalness}
-        roughness={acrylicLiquidGlassMaterial.roughness}
-        transparent
-        opacity={acrylicLiquidGlassMaterial.previewOpacity}
-        transmission={acrylicLiquidGlassMaterial.transmission}
-        thickness={acrylicLiquidGlassMaterial.thickness}
-        ior={acrylicLiquidGlassMaterial.ior}
-        clearcoat={acrylicLiquidGlassMaterial.clearcoat}
-        clearcoatRoughness={acrylicLiquidGlassMaterial.clearcoatRoughness}
-        reflectivity={acrylicLiquidGlassMaterial.reflectivity}
-        envMapIntensity={acrylicLiquidGlassMaterial.envMapIntensity}
-        attenuationColor={acrylicColorSpec?.attenuationColor ?? acrylicLiquidGlassMaterial.attenuationColor}
-        attenuationDistance={acrylicLiquidGlassMaterial.attenuationDistance}
-      />
-    )
-    : isWood
-      ? <meshStandardMaterial map={woodTexture ?? undefined} color="#ffffff" metalness={0.02} roughness={0.52} />
-      : <meshPhysicalMaterial color={color} metalness={metalSpec.metalness} roughness={metalSpec.roughness} clearcoat={0.28} clearcoatRoughness={0.16} envMapIntensity={1.45} />;
+  const surfaceMaterial = (finish: ComponentPrimitive["finish"] = "metal") => finish === "rubber"
+    ? <meshStandardMaterial color="#252422" metalness={0.02} roughness={0.82} /> : finish === "dark-metal"
+      ? <meshPhysicalMaterial color="#343434" metalness={0.72} roughness={0.34} clearcoat={0.12} clearcoatRoughness={0.22} envMapIntensity={1.1} /> : isAcrylic
+        ? <meshPhysicalMaterial color={color} map={acrylicTexture ?? undefined} roughnessMap={acrylicTexture ?? undefined} metalness={acrylicLiquidGlassMaterial.metalness} roughness={acrylicLiquidGlassMaterial.roughness} transparent opacity={acrylicLiquidGlassMaterial.previewOpacity} transmission={acrylicLiquidGlassMaterial.transmission} thickness={acrylicLiquidGlassMaterial.thickness} ior={acrylicLiquidGlassMaterial.ior} clearcoat={acrylicLiquidGlassMaterial.clearcoat} clearcoatRoughness={acrylicLiquidGlassMaterial.clearcoatRoughness} reflectivity={acrylicLiquidGlassMaterial.reflectivity} envMapIntensity={acrylicLiquidGlassMaterial.envMapIntensity} attenuationColor={acrylicColorSpec?.attenuationColor ?? acrylicLiquidGlassMaterial.attenuationColor} attenuationDistance={acrylicLiquidGlassMaterial.attenuationDistance} />
+        : isWood
+          ? <meshStandardMaterial map={woodTexture ?? undefined} color="#ffffff" metalness={0.02} roughness={0.52} />
+          : <meshPhysicalMaterial color={color} metalness={metalSpec.metalness} roughness={metalSpec.roughness} clearcoat={0.28} clearcoatRoughness={0.16} envMapIntensity={1.45} />;
   return (
     <group ref={onObjectReady} scale={fit.scale.toArray() as Vec3Tuple}>
       <group position={fit.center.clone().multiplyScalar(-1).toArray() as Vec3Tuple}>
@@ -2060,7 +2041,7 @@ function ComponentModel({ part, displayMode = "preview", onObjectReady }: { part
         ) : hollowGeometry ? <group><mesh geometry={hollowGeometry}>{surfaceMaterial()}</mesh><BooleanPrimitiveContours primitives={renderPrimitives} /></group> : part.geometry.primitives.map((primitive, index) => (
           <mesh key={`${primitive.shape}-${index}`} position={primitive.position} rotation={(primitive.rotation ?? [0, 0, 0]).map(degToRad) as Vec3Tuple}>
             {primitive.shape === "box" || primitive.shape === "roundedBox" ? <boxGeometry args={primitive.size} /> : primitive.shape === "ring" ? <AnnularGeometry innerDiameter={part.parameters?.innerDiameter ?? 10} outerDiameter={part.parameters?.outerDiameter ?? 25} thickness={part.parameters?.thickness ?? 8} /> : <cylinderGeometry args={[primitive.size[0] / 2 * (part.shaftParameters ? shaftDiameterScale : 1), primitive.size[2] / 2 * (part.shaftParameters ? shaftDiameterScale : 1), part.shaftParameters ? shaftPreviewLength : primitive.size[1], 32]} />}
-            {surfaceMaterial()}
+            {surfaceMaterial(primitive.finish)}
             <ModelContour />
           </mesh>
         ))}
@@ -3300,7 +3281,7 @@ function ComponentLibraryPage({ lang, theme, parts, onPartsChange, onBackToDesig
           <div className="component-grid">
             {filteredParts.map((part) => <article key={part.id} data-component-id={part.id} data-component-kind={part.kind} className={`component-card ${selectedPartId === part.id ? "selected" : ""}`} onClick={() => setSelectedPartId(part.id)}>
               <ComponentListPreview part={part} />
-              <div className="component-card-head"><div><span>{part.model}</span><h2>{part.name}</h2>{part.variantCount && <span className="component-variant-count">{part.variantCount} {lang === "zh" ? "个可选规格" : "VARIANTS"}</span>}</div>{part.kind === "joint" && <div className="component-smart-ports"><i />{part.geometry.ports.filter(isShaftAssemblyPort).length} {lang === "zh" ? "光轴端口" : "SHAFT PORTS"}</div>}</div>
+              <div className="component-card-head"><div><span>{part.model}</span><h2>{part.name}</h2>{part.variantCount && <span className="component-variant-count">{part.variantCount} {lang === "zh" ? "个可选规格" : "VARIANTS"}</span>}</div>{part.kind === "joint" && <div className="component-smart-ports"><i />{part.geometry.ports.filter((port) => isShaftAssemblyPort(port) || isThreadedStemPort(port)).length} {part.geometry.ports.some(isThreadedStemPort) ? (lang === "zh" ? "螺纹端口" : "THREADED PORT") : (lang === "zh" ? "光轴端口" : "SHAFT PORTS")}</div>}</div>
               <dl className="component-card-summary">
                 <div className="component-card-usage"><dt>{labels.usage}</dt><dd>{usageSummary(part.usageTags, part.kind, lang)}</dd></div>
                 <div className="component-card-interface"><dt>{labels.interface}</dt><dd>{part.connector}</dd></div>
@@ -3359,7 +3340,7 @@ function ComponentLibraryPage({ lang, theme, parts, onPartsChange, onBackToDesig
                 </section>
                 <div className="component-editor-stage-status">
                   <span>{lang === "zh" ? "外形" : "ENVELOPE"} <strong>{draft.dimensions.width} × {draft.dimensions.length} × {draft.dimensions.height} mm</strong></span>
-                  <span>{lang === "zh" ? "智能端口" : "SMART PORTS"} <strong>{draft.geometry.ports.filter(isShaftAssemblyPort).length}</strong></span>
+                  <span>{lang === "zh" ? "智能端口" : "SMART PORTS"} <strong>{draft.geometry.ports.filter((port) => isShaftAssemblyPort(port) || isThreadedStemPort(port)).length}</strong></span>
                   <span>{lang === "zh" ? "状态" : "STATUS"} <strong>{draft.status === "ready" ? labels.ready : draft.status === "review" ? labels.review : labels.draft}</strong></span>
                 </div>
               </div>
@@ -3386,7 +3367,7 @@ function ComponentLibraryPage({ lang, theme, parts, onPartsChange, onBackToDesig
                 </section>
                 <section className="component-usage-section component-editor-inspector-group"><div className="component-editor-group-title"><WandSparkles size={15} /><div><span>03</span><h3>{lang === "zh" ? "用途与智能设计" : "USAGE & SMART DESIGN"}</h3></div></div><div className="usage-option-grid">{componentUsageOptions.map((tag) => { const active = normalizeUsageTags(draft.kind, draft.usageTags).includes(tag); return <button type="button" key={tag} className={active ? "active" : ""} onClick={() => toggleDraftUsage(tag)}>{usageLabel(tag, lang)}</button>; })}</div><p>{lang === "zh" ? "用途用于匹配框架、承托、限位、壁装和滑动结构。" : "Usage guides frame, support, stop, wall-mount, and motion patterns."}</p></section>
                 <section className="component-editor-inspector-group component-editor-assembly-group"><div className="component-editor-group-title"><Target size={15} /><div><span>04</span><h3>{lang === "zh" ? "连接与智能吸附" : "ASSEMBLY & SMART SNAP"}</h3></div></div>
-                  {draft.kind === "joint" && !draft.parameters && !draft.parallelClampParameters && draft.equalBoreCrossClampDiameter === undefined && draft.equalBoreTClampDiameter === undefined && draft.equalBoreSwivelClampDiameter === undefined && draft.roundFixedBaseInnerDiameter === undefined && draft.verticalFixedBaseShaftDiameter === undefined && <div className="smart-port-section"><div className="smart-port-heading"><div><p>{lang === "zh" ? "端口中心、轴向和孔径直接参与自动吸附校验。" : "Port center, axis, and diameter drive automatic snapping."}</p></div><strong>{draft.geometry.ports.filter(isShaftAssemblyPort).length}</strong></div><div className="smart-port-list">{draft.geometry.ports.filter(isShaftAssemblyPort).map((port) => <div className="smart-port-row" key={port.id}><div className="smart-port-id"><i /><strong>{port.id}</strong><span>{port.kind}</span></div><div className="smart-port-fields"><label>{lang === "zh" ? "轴向" : "AXIS"}<select aria-label={`${port.id} axis`} value={port.axis} onChange={(event) => updateDraftPort(port.id, { axis: event.target.value as ComponentPort["axis"] })}>{(["x", "y", "z"] as const).map((axis) => <option key={axis} value={axis}>{axis.toUpperCase()}</option>)}</select></label><label>{lang === "zh" ? "行为" : "BEHAVIOR"}<select aria-label={`${port.id} behavior`} value={port.behavior} onChange={(event) => updateDraftPort(port.id, { behavior: event.target.value as PortBehavior })}><option value="fixed">FIXED</option><option value="slide">SLIDE</option><option value="stop">STOP</option></select></label><label>{lang === "zh" ? "孔径" : "DIAMETER"}<input aria-label={`${port.id} diameter`} type="number" min="0.1" step="0.1" value={port.diameter} onChange={(event) => updateDraftPort(port.id, { diameter: Number(event.target.value) })} /><span>mm</span></label><label>{lang === "zh" ? "容差" : "TOLERANCE"}<input aria-label={`${port.id} tolerance`} type="number" min="0" step="0.05" value={port.toleranceMm} onChange={(event) => updateDraftPort(port.id, { toleranceMm: Number(event.target.value) })} /><span>mm</span></label><label>{lang === "zh" ? "容量" : "CAPACITY"}<input aria-label={`${port.id} capacity`} type="number" min="1" step="1" value={port.capacity} onChange={(event) => updateDraftPort(port.id, { capacity: Math.max(1, Number(event.target.value)) })} /></label></div><div className="smart-port-position">{(["X", "Y", "Z"] as const).map((axis, index) => <label key={axis}>{lang === "zh" ? `局部 ${axis}` : `LOCAL ${axis}`}<input aria-label={`${port.id} position ${axis}`} type="number" step="0.01" value={port.position[index]} onChange={(event) => { const position = [...port.position] as Vec3Tuple; position[index] = Number(event.target.value); updateDraftPort(port.id, { position }); }} /></label>)}</div></div>)}</div></div>}
+                  {draft.kind === "joint" && !draft.parameters && !draft.parallelClampParameters && draft.equalBoreCrossClampDiameter === undefined && draft.equalBoreTClampDiameter === undefined && draft.equalBoreSwivelClampDiameter === undefined && draft.roundFixedBaseInnerDiameter === undefined && draft.verticalFixedBaseShaftDiameter === undefined && <div className="smart-port-section"><div className="smart-port-heading"><div><p>{lang === "zh" ? "端口中心、轴向和孔径直接参与自动吸附校验。" : "Port center, axis, and diameter drive automatic snapping."}</p></div><strong>{draft.geometry.ports.filter((port) => isShaftAssemblyPort(port) || isThreadedStemPort(port)).length}</strong></div><div className="smart-port-list">{draft.geometry.ports.filter((port) => isShaftAssemblyPort(port) || isThreadedStemPort(port)).map((port) => <div className="smart-port-row" key={port.id}><div className="smart-port-id"><i /><strong>{port.id}</strong><span>{port.kind}</span></div><div className="smart-port-fields"><label>{lang === "zh" ? "轴向" : "AXIS"}<select aria-label={`${port.id} axis`} value={port.axis} onChange={(event) => updateDraftPort(port.id, { axis: event.target.value as ComponentPort["axis"] })}>{(["x", "y", "z"] as const).map((axis) => <option key={axis} value={axis}>{axis.toUpperCase()}</option>)}</select></label><label>{lang === "zh" ? "行为" : "BEHAVIOR"}<select aria-label={`${port.id} behavior`} value={port.behavior} onChange={(event) => updateDraftPort(port.id, { behavior: event.target.value as PortBehavior })}><option value="fixed">FIXED</option><option value="slide">SLIDE</option><option value="stop">STOP</option></select></label><label>{lang === "zh" ? "直径" : "DIAMETER"}<input aria-label={`${port.id} diameter`} type="number" min="0.1" step="0.1" value={port.diameter} onChange={(event) => updateDraftPort(port.id, { diameter: Number(event.target.value) })} /><span>mm</span></label><label>{lang === "zh" ? "容差" : "TOLERANCE"}<input aria-label={`${port.id} tolerance`} type="number" min="0" step="0.05" value={port.toleranceMm} onChange={(event) => updateDraftPort(port.id, { toleranceMm: Number(event.target.value) })} /><span>mm</span></label><label>{lang === "zh" ? "容量" : "CAPACITY"}<input aria-label={`${port.id} capacity`} type="number" min="1" step="1" value={port.capacity} onChange={(event) => updateDraftPort(port.id, { capacity: Math.max(1, Number(event.target.value)) })} /></label></div><div className="smart-port-position">{(["X", "Y", "Z"] as const).map((axis, index) => <label key={axis}>{lang === "zh" ? `局部 ${axis}` : `LOCAL ${axis}`}<input aria-label={`${port.id} position ${axis}`} type="number" step="0.01" value={port.position[index]} onChange={(event) => { const position = [...port.position] as Vec3Tuple; position[index] = Number(event.target.value); updateDraftPort(port.id, { position }); }} /></label>)}</div></div>)}</div></div>}
                   {draft.parallelClampParameters ? <div className="parallel-clamp-derived" aria-label={lang === "zh" ? "自动同步的装配信息" : "AUTOMATIC ASSEMBLY INFORMATION"}><p className="parameter-family-hint">{lang === "zh" ? `自动同步：P1 Ø${draft.parallelClampParameters.hole1Diameter} mm / P2 Ø${draft.parallelClampParameters.hole2Diameter} mm · 孔距 ${draft.parallelClampParameters.holeCenterDistance} mm` : `AUTO-SYNCED: P1 Ø${draft.parallelClampParameters.hole1Diameter} MM / P2 Ø${draft.parallelClampParameters.hole2Diameter} MM · PITCH ${draft.parallelClampParameters.holeCenterDistance} MM`}</p></div> : draft.equalBoreCrossClampDiameter !== undefined ? <div className="parallel-clamp-derived" aria-label={lang === "zh" ? "自动同步的装配信息" : "AUTOMATIC ASSEMBLY INFORMATION"}><p className="parameter-family-hint">{lang === "zh" ? `自动同步：P1 / P2 均为 Ø${draft.equalBoreCrossClampDiameter} mm · ${draft.connector}` : `AUTO-SYNCED: P1 / P2 Ø${draft.equalBoreCrossClampDiameter} MM · ${draft.connector}`}</p></div> : draft.equalBoreTClampDiameter !== undefined ? <div className="parallel-clamp-derived" aria-label={lang === "zh" ? "自动同步的装配信息" : "AUTOMATIC ASSEMBLY INFORMATION"}><p className="parameter-family-hint">{lang === "zh" ? `自动同步：P1 / P2 均为 Ø${draft.equalBoreTClampDiameter} mm · ${draft.connector}` : `AUTO-SYNCED: P1 / P2 Ø${draft.equalBoreTClampDiameter} MM · ${draft.connector}`}</p></div> : draft.equalBoreSwivelClampDiameter !== undefined ? <div className="parallel-clamp-derived" aria-label={lang === "zh" ? "自动同步的装配信息" : "AUTOMATIC ASSEMBLY INFORMATION"}><p className="parameter-family-hint">{lang === "zh" ? `自动同步：P1-Z / P2-Z 均为 Ø${draft.equalBoreSwivelClampDiameter} mm · ${draft.connector}` : `AUTO-SYNCED: P1-Z / P2-Z Ø${draft.equalBoreSwivelClampDiameter} MM · ${draft.connector}`}</p></div> : draft.parameters ? <div className="parallel-clamp-derived" aria-label={lang === "zh" ? "自动同步的装配信息" : "AUTOMATIC ASSEMBLY INFORMATION"}><p className="parameter-family-hint">{lang === "zh" ? `自动同步：限位孔 Ø${draft.parameters.innerDiameter} mm · ${draft.connector}` : `AUTO-SYNCED: STOP BORE Ø${draft.parameters.innerDiameter} MM · ${draft.connector}`}</p></div> : draft.roundFixedBaseInnerDiameter !== undefined ? <div className="parallel-clamp-derived" aria-label={lang === "zh" ? "自动同步的装配信息" : "AUTOMATIC ASSEMBLY INFORMATION"}><p className="parameter-family-hint">{lang === "zh" ? `自动同步：光轴孔 Ø${draft.roundFixedBaseInnerDiameter} mm · ${draft.connector}` : `AUTO-SYNCED: SHAFT BORE Ø${draft.roundFixedBaseInnerDiameter} MM · ${draft.connector}`}</p></div> : draft.verticalFixedBaseShaftDiameter !== undefined ? <div className="parallel-clamp-derived" aria-label={lang === "zh" ? "自动同步的装配信息" : "AUTOMATIC ASSEMBLY INFORMATION"}><p className="parameter-family-hint">{lang === "zh" ? `自动同步：${draft.model} · 光轴孔 Ø${draft.verticalFixedBaseShaftDiameter} mm · ${draft.connector}` : `AUTO-SYNCED: ${draft.model} · SHAFT BORE Ø${draft.verticalFixedBaseShaftDiameter} MM · ${draft.connector}`}</p></div> : <div className="component-editor-compatibility"><label>{lang === "zh" ? "适配光轴" : "COMPATIBLE ROD"}<input value={draft.compatibleRod} onChange={(event) => setDraft({ ...draft, compatibleRod: event.target.value })} /></label><label>{labels.interface}<input value={draft.connector} onChange={(event) => setDraft({ ...draft, connector: event.target.value })} /></label></div>}
                 </section>
                 <section className={`model-fidelity-panel component-editor-inspector-group ${draft.modelAssetUrl ? "imported" : "approximate"}`}><div className="component-editor-group-title"><Download size={15} /><div><span>05</span><h3>{lang === "zh" ? "模型文件" : "MODEL FILE"}</h3></div></div>
@@ -7921,20 +7902,12 @@ function InspectorPanel({
           open={openSections.assembly}
           onToggle={() => toggleSection("assembly")}
         >
-          {preciseRelations.length === 0 ? (
-            <p className="assembly-relation-empty">{lang === "zh"
-              ? "双选组件后，可建立表面贴合、毫米间距或孔轴同心关系。"
-              : "SELECT TWO PARTS TO CREATE CONTACT, GAP, OR SHAFT-BORE RELATIONS."}</p>
-          ) : (
+          {preciseRelations.length === 0 ? <p className="assembly-relation-empty">{lang === "zh" ? "双选组件后，可建立表面贴合、毫米间距、孔轴同心或螺纹孔连接。" : "SELECT TWO PARTS TO CREATE CONTACT, GAP, SHAFT-BORE, OR THREADED-BORE RELATIONS."}</p> : (
             <div className="assembly-relation-list">
               {preciseRelations.map((relation) => (
                 <article key={relation.id} data-relation-status={relation.status}>
                   <div>
-                    <strong>{relation.type === "surface-contact"
-                      ? (lang === "zh" ? "表面贴合" : "SURFACE CONTACT")
-                      : relation.type === "surface-gap"
-                        ? (lang === "zh" ? `表面间距 ${relation.gapMm?.toFixed(1) ?? "0.0"} mm` : `SURFACE GAP ${relation.gapMm?.toFixed(1) ?? "0.0"} MM`)
-                        : (lang === "zh" ? "孔轴同心" : "SHAFT / BORE")}</strong>
+                    <strong>{relation.type === "surface-contact" ? (lang === "zh" ? "表面贴合" : "SURFACE CONTACT") : relation.type === "surface-gap" ? (lang === "zh" ? `表面间距 ${relation.gapMm?.toFixed(1) ?? "0.0"} mm` : `SURFACE GAP ${relation.gapMm?.toFixed(1) ?? "0.0"} MM`) : relation.type === "thread-bore" ? (lang === "zh" ? "螺纹杆 / 孔连接" : "THREADED STEM / BORE") : (lang === "zh" ? "孔轴同心" : "SHAFT / BORE")}</strong>
                     <span>{relation.fixedPartId} → {relation.movingPartId}</span>
                     <small>{relation.fixedFeatureId} ↔ {relation.movingFeatureId} · {relation.residualMm.toFixed(1)} mm</small>
                     {relation.message && <em>{relation.message}</em>}
@@ -7968,7 +7941,7 @@ function InspectorPanel({
                           </label>
                         )}
                       </div>
-                    ) : (
+                    ) : relation.type === "surface-contact" || relation.type === "surface-gap" ? (
                       <label className="assembly-relation-gap-editor">
                         <span>{lang === "zh" ? "净距" : "GAP"}</span>
                         <input
@@ -7983,7 +7956,7 @@ function InspectorPanel({
                         />
                         <b>mm</b>
                       </label>
-                    )}
+                    ) : null}
                   </div>
                   <button
                     type="button"
@@ -8939,7 +8912,7 @@ export function App() {
     }
     let nextPreciseRelations = [...preciseAssemblyRelations];
     preciseAssemblyRelations.filter(({ type, status }) =>
-      type !== "shaft-bore" && status !== "invalid",
+      (type === "surface-contact" || type === "surface-gap") && status !== "invalid",
     ).forEach((relation) => {
       const relationTransforms = { ...transforms, ...nextTransforms };
       const fixed = buildPreciseBoxPart({
@@ -9536,6 +9509,28 @@ export function App() {
     if (selectedPairConnectors.length === 2) {
       const anchorTransform = getPartTransform(transforms, anchorId);
       const movingTransform = getPartTransform(transforms, movingId);
+      const anchorPorts = fittedComponentPorts(addedParts.find((part) => part.id === anchorId)?.libraryPart ?? defaultCrossConnectorPart);
+      const movingPorts = fittedComponentPorts(addedParts.find((part) => part.id === movingId)?.libraryPart ?? defaultCrossConnectorPart);
+      const hasThreadedPortPair = anchorPorts.some(isThreadedStemPort) && movingPorts.some(isShaftAssemblyPort) || movingPorts.some(isThreadedStemPort) && anchorPorts.some(isShaftAssemblyPort);
+      if (hasThreadedPortPair) {
+        const threadedMate = findBestThreadedPortMate({
+          fixed: { partId: anchorId, position: getPartWorldPosition(anchorId, dimensions, addedParts, transforms), rotation: [anchorTransform.rotX, anchorTransform.rotY, anchorTransform.rotZ], ports: anchorPorts },
+          moving: { partId: movingId, position: getPartWorldPosition(movingId, dimensions, addedParts, transforms), rotation: [movingTransform.rotX, movingTransform.rotY, movingTransform.rotZ], ports: movingPorts },
+          maxDistanceMm: 10000, axisToleranceDeg: 7.5,
+        });
+        if (!threadedMate) { setAlignmentNotice(lang === "zh" ? "螺纹连接失败：请将 M8 螺纹杆轴向对准 Ø8 mm 连接孔；系统不会自动旋转组件" : "THREADED CONNECTION FAILED: ALIGN THE M8 STEM WITH AN Ø8 MM BORE; PARTS ARE NOT AUTO-ROTATED"); return; }
+        const fixedPort = anchorPorts.find(({ id }) => id === threadedMate.fixedPortId)!;
+        const movingPort = movingPorts.find(({ id }) => id === threadedMate.movingPortId)!;
+        const connection: AssemblyConnection = { connectorId: threadedMate.borePartId, portId: threadedMate.borePortId, shaftId: threadedMate.stemPartId, positionOnShaft: 0.5, behavior: "fixed" };
+        recordHistory("align");
+        setTransforms((current) => ({ ...current, [movingId]: transformAtWorldPoint(movingId, threadedMate.position, dimensions, addedParts, movingTransform) }));
+        setAssemblyConnections((current) => [...current.filter((candidate) => candidate.connectorId !== movingId && candidate.shaftId !== movingId), connection]);
+        setPreciseAssemblyRelations((current) => replacePairRelation(current.map((relation) => relation.fixedPartId === movingId || relation.movingPartId === movingId ? { ...relation, status: "invalid" as const, message: lang === "zh" ? "组件位置已改变，需要重新求解" : "PART MOVED; RELATION REQUIRES RESOLVE" } : relation), createThreadBoreRelation({
+          id: `REL-THREAD-${threadedMate.borePartId}-${threadedMate.borePortId}-${threadedMate.stemPartId}`, fixedPartId: anchorId, movingPartId: movingId, fixedPortId: threadedMate.fixedPortId, movingPortId: threadedMate.movingPortId, threadDiameterMm: isThreadedStemPort(fixedPort) ? fixedPort.diameter : movingPort.diameter, boreDiameterMm: isShaftAssemblyPort(fixedPort) ? fixedPort.diameter : movingPort.diameter,
+        })));
+        setAlignmentNotice(lang === "zh" ? `已保持 ${anchorId} 不动，并将 ${movingId} 的 M8 螺纹杆连接到 Ø8 mm 孔` : `KEPT ${anchorId} FIXED AND CONNECTED ${movingId} VIA THE M8 STEM AND Ø8 MM BORE`);
+        return;
+      }
       const surfaceContact = snapConnectorToConnectorSurface({
         position: getPartWorldPosition(movingId, dimensions, addedParts, transforms),
         rotation: [movingTransform.rotX, movingTransform.rotY, movingTransform.rotZ],
@@ -9848,9 +9843,11 @@ export function App() {
     }));
   };
   const removePreciseAssemblyRelation = (relationId: string) => {
-    if (!preciseAssemblyRelations.some(({ id }) => id === relationId)) return;
+    const relation = preciseAssemblyRelations.find(({ id }) => id === relationId);
+    if (!relation) return;
     recordHistory("edit");
     setPreciseAssemblyRelations((current) => current.filter(({ id }) => id !== relationId));
+    if (relation.type === "thread-bore") { const partIds = new Set([relation.fixedPartId, relation.movingPartId]); const portIds = new Set([relation.fixedFeatureId, relation.movingFeatureId]); setAssemblyConnections((current) => current.filter((connection) => !(partIds.has(connection.connectorId) && partIds.has(connection.shaftId) && portIds.has(connection.portId)))); }
     setAlignmentNotice(lang === "zh" ? "装配关系已解除" : "ASSEMBLY RELATION REMOVED");
   };
   const updatePreciseAssemblyRelation = (
@@ -9859,6 +9856,7 @@ export function App() {
   ) => {
     const relation = preciseAssemblyRelations.find(({ id }) => id === relationId);
     if (!relation) return;
+    if (relation.type === "thread-bore") return;
     if (relation.type !== "shaft-bore") {
       const nextGap = Math.max(0, patch.gapMm ?? relation.gapMm ?? 0);
       const fixed = buildPreciseBoxPart({ id: relation.fixedPartId, dimensions, addedParts, transforms });

@@ -80,6 +80,24 @@ export type PanelHoleTarget = {
   diameter: number;
 };
 
+export type PortMatePart = {
+  partId: string;
+  position: Vec3;
+  rotation: Vec3;
+  ports: AssemblyPort[];
+};
+
+export type ThreadedPortMateResult = {
+  position: Vec3;
+  fixedPortId: string;
+  movingPortId: string;
+  stemPartId: string;
+  stemPortId: string;
+  borePartId: string;
+  borePortId: string;
+  distanceMm: number;
+};
+
 type SnapInput = {
   connectorId: string;
   proposedPosition: Vec3;
@@ -166,6 +184,10 @@ export function isShaftAssemblyPort(port: AssemblyPort) {
   return id.startsWith("P") || id.includes("SHAFT") || id.includes("SLIDE") || id === "BORE";
 }
 
+export function isThreadedStemPort(port: AssemblyPort) {
+  return port.kind === "shaft-end" && port.diameter > 0;
+}
+
 /**
  * Checks a shaft against a bore using an asymmetric fit rule. A shaft may be
  * up to `maximumClearanceMm` smaller than the bore, while a shaft that is
@@ -192,6 +214,80 @@ export function isShaftDiameterCompatible({
   return clearanceMm >= 0
     ? clearanceMm <= Math.max(maximumClearanceMm, oversizeToleranceMm)
     : -clearanceMm <= oversizeToleranceMm;
+}
+
+/**
+ * Mates a male threaded stem to a bore without rotating either component.
+ * Port positions are expected to use the same fitted scene scale as the model.
+ */
+export function findBestThreadedPortMate({
+  fixed,
+  moving,
+  maxDistanceMm = 10000,
+  axisToleranceDeg = 7.5,
+  sceneUnitsPerMm = 0.01,
+}: {
+  fixed: PortMatePart;
+  moving: PortMatePart;
+  maxDistanceMm?: number;
+  axisToleranceDeg?: number;
+  sceneUnitsPerMm?: number;
+}): ThreadedPortMateResult | null {
+  if (sceneUnitsPerMm <= 0) return null;
+  const minimumAxisDot = Math.cos(axisToleranceDeg * Math.PI / 180);
+  const candidates: ThreadedPortMateResult[] = [];
+
+  for (const fixedPort of fixed.ports) {
+    for (const movingPort of moving.ports) {
+      const fixedIsStem = isThreadedStemPort(fixedPort);
+      const movingIsStem = isThreadedStemPort(movingPort);
+      const fixedIsBore = isShaftAssemblyPort(fixedPort);
+      const movingIsBore = isShaftAssemblyPort(movingPort);
+      if (!((fixedIsStem && movingIsBore) || (movingIsStem && fixedIsBore))) continue;
+
+      const stemPort = fixedIsStem ? fixedPort : movingPort;
+      const borePort = fixedIsBore ? fixedPort : movingPort;
+      const stemPart = fixedIsStem ? fixed : moving;
+      const borePart = fixedIsBore ? fixed : moving;
+      const fitToleranceMm = Math.max(
+        0.25,
+        stemPort.toleranceMm ?? 0,
+        borePort.toleranceMm ?? 0,
+      );
+      if (!isShaftDiameterCompatible({
+        boreDiameterMm: borePort.diameter,
+        shaftDiameterMm: stemPort.diameter,
+        oversizeToleranceMm: fitToleranceMm,
+        maximumClearanceMm: fitToleranceMm,
+      })) continue;
+
+      const fixedAxis = normalize(rotateVector(portLocalDirection(fixedPort), fixed.rotation));
+      const movingAxis = normalize(rotateVector(portLocalDirection(movingPort), moving.rotation));
+      if (Math.abs(dot(fixedAxis, movingAxis)) < minimumAxisDot) continue;
+
+      const fixedPortPosition = add(fixed.position, rotateVector(fixedPort.position, fixed.rotation));
+      const movingPortOffset = rotateVector(movingPort.position, moving.rotation);
+      const solvedPosition = subtract(fixedPortPosition, movingPortOffset);
+      const distanceMm = distance(solvedPosition, moving.position) / sceneUnitsPerMm;
+      if (distanceMm > maxDistanceMm) continue;
+      candidates.push({
+        position: solvedPosition,
+        fixedPortId: fixedPort.id,
+        movingPortId: movingPort.id,
+        stemPartId: stemPart.partId,
+        stemPortId: stemPort.id,
+        borePartId: borePart.partId,
+        borePortId: borePort.id,
+        distanceMm,
+      });
+    }
+  }
+
+  candidates.sort((left, right) =>
+    left.distanceMm - right.distanceMm
+    || left.fixedPortId.localeCompare(right.fixedPortId)
+    || left.movingPortId.localeCompare(right.movingPortId));
+  return candidates[0] ?? null;
 }
 
 export function findBestSmartSnap({

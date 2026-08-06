@@ -5,7 +5,7 @@ import {
   type Vec3,
 } from "./assembly";
 
-export type PreciseRelationType = "surface-contact" | "surface-gap" | "shaft-bore";
+export type PreciseRelationType = "surface-contact" | "surface-gap" | "shaft-bore" | "thread-bore";
 export type PreciseRelationStatus = "valid" | "warning" | "invalid";
 export type ShaftAxialReference = "preserve" | "shaft-center" | "shaft-start" | "shaft-end";
 
@@ -304,6 +304,38 @@ export function createShaftBoreRelation({
     status: residualMm <= 0.1 ? "valid" : "warning",
     residualMm,
     message: `${connectorId}:${portId} ↔ ${shaftId}`,
+  };
+}
+
+export function createThreadBoreRelation({
+  id,
+  fixedPartId,
+  movingPartId,
+  fixedPortId,
+  movingPortId,
+  threadDiameterMm,
+  boreDiameterMm,
+  residualMm = 0,
+}: {
+  id: string;
+  fixedPartId: string;
+  movingPartId: string;
+  fixedPortId: string;
+  movingPortId: string;
+  threadDiameterMm: number;
+  boreDiameterMm: number;
+  residualMm?: number;
+}): PreciseAssemblyRelation {
+  return {
+    id,
+    type: "thread-bore",
+    fixedPartId,
+    movingPartId,
+    fixedFeatureId: fixedPortId,
+    movingFeatureId: movingPortId,
+    status: residualMm <= 0.1 ? "valid" : "warning",
+    residualMm,
+    message: `M${threadDiameterMm} ↔ Ø${boreDiameterMm}`,
   };
 }
 

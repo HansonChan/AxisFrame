@@ -11,6 +11,7 @@ export type BooleanComponentPrimitive = {
   radius?: number;
   appearance?: "solid" | "cutout" | "post-cutout";
   feature?: "drilled-hole" | "shaft-bore" | "pivot-male" | "pivot-female" | "joint-seam";
+  finish?: "metal" | "rubber" | "dark-metal";
   booleanGroup?: string;
 };
 
