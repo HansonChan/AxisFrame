@@ -20,11 +20,29 @@ export function parseProjectBackup<TProject>(
   text: string,
   isProject: (value: unknown) => value is TProject,
 ): ProjectBackup<TProject> {
-  const parsed = JSON.parse(text) as Partial<Omit<ProjectBackup<unknown>, "schemaVersion">> & { schemaVersion?: number };
+  return validateProjectBackup(JSON.parse(text), isProject);
+}
+
+function validateProjectBackup<TProject>(
+  value: unknown,
+  isProject: (value: unknown) => value is TProject,
+): ProjectBackup<TProject> {
+  const parsed = value as Partial<Omit<ProjectBackup<unknown>, "schemaVersion">> & { schemaVersion?: number };
   if (parsed.schema !== "axisframe-project-backup") throw new Error("INVALID_BACKUP_SCHEMA");
   if (parsed.schemaVersion !== 1 && parsed.schemaVersion !== PROJECT_SCHEMA_VERSION) throw new Error("UNSUPPORTED_BACKUP_VERSION");
   if (!Array.isArray(parsed.projects) || !parsed.projects.every(isProject)) throw new Error("INVALID_PROJECT_DATA");
   return { ...parsed, schemaVersion: PROJECT_SCHEMA_VERSION } as ProjectBackup<TProject>;
+}
+
+export function parseProjectImport<TProject>(
+  text: string,
+  isProject: (value: unknown) => value is TProject,
+): ProjectBackup<TProject> {
+  const parsed = JSON.parse(text) as unknown;
+  if (isProject(parsed)) {
+    return createProjectBackup([parsed]);
+  }
+  return validateProjectBackup(parsed, isProject);
 }
 
 export function downloadJsonFile(filename: string, value: unknown) {

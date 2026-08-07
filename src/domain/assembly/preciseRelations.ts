@@ -1,7 +1,11 @@
 import * as THREE from "three";
-import type { Vec3 } from "./assembly";
+import {
+  type AssemblyConnection,
+  type ShaftSegment,
+  type Vec3,
+} from "./assembly";
 
-export type PreciseRelationType = "surface-contact" | "surface-gap" | "shaft-bore";
+export type PreciseRelationType = "surface-contact" | "surface-gap" | "shaft-bore" | "thread-bore";
 export type PreciseRelationStatus = "valid" | "warning" | "invalid";
 export type ShaftAxialReference = "preserve" | "shaft-center" | "shaft-start" | "shaft-end";
 
@@ -56,6 +60,13 @@ export type SurfaceRelationResult =
   | { ok: true; candidate: SurfaceRelationCandidate }
   | { ok: false; reason: SurfaceRelationFailure };
 
+export type ShaftAxisMoveResult = {
+  position: Vec3;
+  axis: Vec3;
+  appliedDistanceMm: number;
+  connectionPositionDelta: number;
+};
+
 const AXES = [
   new THREE.Vector3(1, 0, 0),
   new THREE.Vector3(0, 1, 0),
@@ -73,6 +84,43 @@ function quaternionForRotation(rotation: Vec3) {
 
 function toVec3(vector: THREE.Vector3): Vec3 {
   return vector.toArray() as Vec3;
+}
+
+export function solveShaftAxisMove({
+  shaft,
+  distanceMm,
+  retainedConnections = [],
+  sceneUnitsPerMm = 0.01,
+}: {
+  shaft: ShaftSegment;
+  distanceMm: number;
+  retainedConnections?: AssemblyConnection[];
+  sceneUnitsPerMm?: number;
+}): ShaftAxisMoveResult | null {
+  if (!Number.isFinite(distanceMm) || sceneUnitsPerMm <= 0) return null;
+  const start = new THREE.Vector3(...shaft.start);
+  const end = new THREE.Vector3(...shaft.end);
+  const shaftVector = end.clone().sub(start);
+  const shaftLength = shaftVector.length();
+  if (shaftLength <= 1e-8) return null;
+  const shaftAxis = shaftVector.clone().normalize();
+  const shaftCenter = start.clone().add(end).multiplyScalar(0.5);
+  const retainedPositions = retainedConnections
+    .filter(({ shaftId }) => shaftId === shaft.partId)
+    .map(({ positionOnShaft }) => THREE.MathUtils.clamp(positionOnShaft, 0, 1));
+  if (retainedPositions.length === 0) return null;
+  const minimumTravelScene = Math.max(...retainedPositions.map((position) => (position - 1) * shaftLength));
+  const maximumTravelScene = Math.min(...retainedPositions.map((position) => position * shaftLength));
+  const requestedTravelScene = distanceMm * sceneUnitsPerMm;
+  const appliedTravelScene = THREE.MathUtils.clamp(requestedTravelScene, minimumTravelScene, maximumTravelScene);
+  const connectionPositionDelta = -appliedTravelScene / shaftLength;
+
+  return {
+    position: toVec3(shaftCenter.clone().addScaledVector(shaftAxis, appliedTravelScene)),
+    axis: toVec3(shaftAxis),
+    appliedDistanceMm: appliedTravelScene / sceneUnitsPerMm,
+    connectionPositionDelta,
+  };
 }
 
 function featureId(axis: number, sign: number) {
@@ -256,6 +304,38 @@ export function createShaftBoreRelation({
     status: residualMm <= 0.1 ? "valid" : "warning",
     residualMm,
     message: `${connectorId}:${portId} ↔ ${shaftId}`,
+  };
+}
+
+export function createThreadBoreRelation({
+  id,
+  fixedPartId,
+  movingPartId,
+  fixedPortId,
+  movingPortId,
+  threadDiameterMm,
+  boreDiameterMm,
+  residualMm = 0,
+}: {
+  id: string;
+  fixedPartId: string;
+  movingPartId: string;
+  fixedPortId: string;
+  movingPortId: string;
+  threadDiameterMm: number;
+  boreDiameterMm: number;
+  residualMm?: number;
+}): PreciseAssemblyRelation {
+  return {
+    id,
+    type: "thread-bore",
+    fixedPartId,
+    movingPartId,
+    fixedFeatureId: fixedPortId,
+    movingFeatureId: movingPortId,
+    status: residualMm <= 0.1 ? "valid" : "warning",
+    residualMm,
+    message: `M${threadDiameterMm} ↔ Ø${boreDiameterMm}`,
   };
 }
 

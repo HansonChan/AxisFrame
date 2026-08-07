@@ -7,12 +7,13 @@ export type ThreeViewDimensions = {
 };
 
 export type ThreeViewPrimitive = {
-  shape: "box" | "cylinder" | "ring";
+  shape: "box" | "roundedBox" | "cylinder" | "ring";
   size: [number, number, number];
   position: [number, number, number];
   rotation?: [number, number, number];
-  appearance?: "solid" | "cutout";
-  feature?: "drilled-hole";
+  radius?: number;
+  appearance?: "solid" | "cutout" | "post-cutout";
+  feature?: "drilled-hole" | "shaft-bore" | "pivot-male" | "pivot-female" | "joint-seam";
 };
 
 export type ThreeViewHoleDraft = {
@@ -221,7 +222,7 @@ function roundPrimitiveValue(value: number): number {
 }
 
 function primitiveProjectedExtent(primitive: ThreeViewPrimitive, axis: 0 | 1 | 2): number {
-  if (primitive.shape === "box") return Math.abs(primitive.size[axis]);
+  if (primitive.shape === "box" || primitive.shape === "roundedBox") return Math.abs(primitive.size[axis]);
   const normalAxis = normalAxisFromPrimitive(primitive);
   const normalIndex = axisIndex(normalAxis);
   if (primitive.shape === "cylinder") {
@@ -430,6 +431,10 @@ export function normalizeCircularCutoutPrimitives(
   const bounds = primitiveBounds(primitives);
   return primitives.map((primitive) => {
     if (primitive.shape !== "cylinder" || primitive.appearance !== "cutout") return primitive;
+    // Stock shaft bores are authored as true circular cylinders in the component's
+    // local pose. Their axes may be at any swivel angle, which the orthographic
+    // three-view normalizer intentionally does not infer.
+    if (primitive.feature === "shaft-bore") return primitive;
     const normalIndex = axisIndex(normalAxisFromPrimitive(primitive));
     const diameterMm = circularCutoutDiameterMm(primitive, bounds, dimensions);
     const size = circularCutoutSize(primitive.size, normalIndex, bounds, dimensions, diameterMm);

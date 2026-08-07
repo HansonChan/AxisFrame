@@ -6,11 +6,13 @@ export type SpatialOrientation = "horizontal" | "vertical" | "diagonal";
 export type AssemblyPort = {
   id: string;
   axis: "x" | "y" | "z";
+  direction?: Vec3;
   position: Vec3;
   diameter: number;
   kind?: PortKind;
   behavior?: PortBehavior;
   toleranceMm?: number;
+  maximumClearanceMm?: number;
   capacity?: number;
 };
 
@@ -79,6 +81,24 @@ export type PanelHoleTarget = {
   diameter: number;
 };
 
+export type PortMatePart = {
+  partId: string;
+  position: Vec3;
+  rotation: Vec3;
+  ports: AssemblyPort[];
+};
+
+export type ThreadedPortMateResult = {
+  position: Vec3;
+  fixedPortId: string;
+  movingPortId: string;
+  stemPartId: string;
+  stemPortId: string;
+  borePartId: string;
+  borePortId: string;
+  distanceMm: number;
+};
+
 type SnapInput = {
   connectorId: string;
   proposedPosition: Vec3;
@@ -86,7 +106,7 @@ type SnapInput = {
   ports: AssemblyPort[];
   shafts: ShaftSegment[];
   occupiedConnections?: AssemblyConnection[];
-  localScale?: number;
+  localScale?: number | Vec3;
   maxDistanceMm?: number;
   diameterToleranceMm?: number;
   axisToleranceDeg?: number;
@@ -103,6 +123,7 @@ const axisVectors: Record<AssemblyPort["axis"], Vec3> = {
 const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const subtract = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const scale = (v: Vec3, amount: number): Vec3 => [v[0] * amount, v[1] * amount, v[2] * amount];
+const scaleAxes = (v: Vec3, amount: number | Vec3): Vec3 => typeof amount === "number" ? scale(v, amount) : [v[0] * amount[0], v[1] * amount[1], v[2] * amount[2]];
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const length = (v: Vec3) => Math.sqrt(dot(v, v));
 const distance = (a: Vec3, b: Vec3) => length(subtract(a, b));
@@ -110,6 +131,10 @@ const normalize = (v: Vec3): Vec3 => {
   const magnitude = length(v);
   return magnitude > 1e-8 ? scale(v, 1 / magnitude) : [0, 0, 0];
 };
+
+export function portLocalDirection(port: AssemblyPort): Vec3 {
+  return normalize(port.direction ?? axisVectors[port.axis]);
+}
 
 export function classifySpatialOrientation(vector: Vec3, cardinalTolerance = 0.85): SpatialOrientation {
   const direction = normalize(vector);
@@ -161,6 +186,10 @@ export function isShaftAssemblyPort(port: AssemblyPort) {
   return id.startsWith("P") || id.includes("SHAFT") || id.includes("SLIDE") || id === "BORE";
 }
 
+export function isThreadedStemPort(port: AssemblyPort) {
+  return port.kind === "shaft-end" && port.diameter > 0;
+}
+
 /**
  * Checks a shaft against a bore using an asymmetric fit rule. A shaft may be
  * up to `maximumClearanceMm` smaller than the bore, while a shaft that is
@@ -189,6 +218,80 @@ export function isShaftDiameterCompatible({
     : -clearanceMm <= oversizeToleranceMm;
 }
 
+/**
+ * Mates a male threaded stem to a bore without rotating either component.
+ * Port positions are expected to use the same fitted scene scale as the model.
+ */
+export function findBestThreadedPortMate({
+  fixed,
+  moving,
+  maxDistanceMm = 10000,
+  axisToleranceDeg = 7.5,
+  sceneUnitsPerMm = 0.01,
+}: {
+  fixed: PortMatePart;
+  moving: PortMatePart;
+  maxDistanceMm?: number;
+  axisToleranceDeg?: number;
+  sceneUnitsPerMm?: number;
+}): ThreadedPortMateResult | null {
+  if (sceneUnitsPerMm <= 0) return null;
+  const minimumAxisDot = Math.cos(axisToleranceDeg * Math.PI / 180);
+  const candidates: ThreadedPortMateResult[] = [];
+
+  for (const fixedPort of fixed.ports) {
+    for (const movingPort of moving.ports) {
+      const fixedIsStem = isThreadedStemPort(fixedPort);
+      const movingIsStem = isThreadedStemPort(movingPort);
+      const fixedIsBore = isShaftAssemblyPort(fixedPort);
+      const movingIsBore = isShaftAssemblyPort(movingPort);
+      if (!((fixedIsStem && movingIsBore) || (movingIsStem && fixedIsBore))) continue;
+
+      const stemPort = fixedIsStem ? fixedPort : movingPort;
+      const borePort = fixedIsBore ? fixedPort : movingPort;
+      const stemPart = fixedIsStem ? fixed : moving;
+      const borePart = fixedIsBore ? fixed : moving;
+      const fitToleranceMm = Math.max(
+        0.25,
+        stemPort.toleranceMm ?? 0,
+        borePort.toleranceMm ?? 0,
+      );
+      if (!isShaftDiameterCompatible({
+        boreDiameterMm: borePort.diameter,
+        shaftDiameterMm: stemPort.diameter,
+        oversizeToleranceMm: fitToleranceMm,
+        maximumClearanceMm: fitToleranceMm,
+      })) continue;
+
+      const fixedAxis = normalize(rotateVector(portLocalDirection(fixedPort), fixed.rotation));
+      const movingAxis = normalize(rotateVector(portLocalDirection(movingPort), moving.rotation));
+      if (Math.abs(dot(fixedAxis, movingAxis)) < minimumAxisDot) continue;
+
+      const fixedPortPosition = add(fixed.position, rotateVector(fixedPort.position, fixed.rotation));
+      const movingPortOffset = rotateVector(movingPort.position, moving.rotation);
+      const solvedPosition = subtract(fixedPortPosition, movingPortOffset);
+      const distanceMm = distance(solvedPosition, moving.position) / sceneUnitsPerMm;
+      if (distanceMm > maxDistanceMm) continue;
+      candidates.push({
+        position: solvedPosition,
+        fixedPortId: fixedPort.id,
+        movingPortId: movingPort.id,
+        stemPartId: stemPart.partId,
+        stemPortId: stemPort.id,
+        borePartId: borePart.partId,
+        borePortId: borePort.id,
+        distanceMm,
+      });
+    }
+  }
+
+  candidates.sort((left, right) =>
+    left.distanceMm - right.distanceMm
+    || left.fixedPortId.localeCompare(right.fixedPortId)
+    || left.movingPortId.localeCompare(right.movingPortId));
+  return candidates[0] ?? null;
+}
+
 export function findBestSmartSnap({
   connectorId,
   proposedPosition,
@@ -212,12 +315,12 @@ export function findBestSmartSnap({
 
   const proposedPortOrientations = new Map(shaftPorts.map((port) => [
     port.id,
-    classifySpatialOrientation(rotateVector(axisVectors[port.axis], proposedRotation)),
+    classifySpatialOrientation(rotateVector(scaleAxes(portLocalDirection(port), localScale), proposedRotation)),
   ]));
   let best: (SmartSnapResult & { score: number; matchCount: number; directionMatchCount: number }) | null = null;
   for (const primaryPort of shaftPorts) {
-    const rotatedPortAxis = normalize(rotateVector(axisVectors[primaryPort.axis], rotation));
-    const rotatedPortOffset = rotateVector(scale(primaryPort.position, localScale), rotation);
+    const rotatedPortAxis = normalize(rotateVector(scaleAxes(portLocalDirection(primaryPort), localScale), rotation));
+    const rotatedPortOffset = rotateVector(scaleAxes(primaryPort.position, localScale), rotation);
     const proposedPortPosition = add(proposedPosition, rotatedPortOffset);
     for (const shaft of shafts) {
         if (requiredShaftIds.length > 0 && !requiredShaftIds.includes(shaft.partId)) continue;
@@ -226,7 +329,7 @@ export function findBestSmartSnap({
           boreDiameterMm: primaryPort.diameter,
           shaftDiameterMm: shaft.diameter,
           oversizeToleranceMm: primaryPortToleranceMm,
-          maximumClearanceMm: Math.max(2, primaryPortToleranceMm),
+          maximumClearanceMm: Math.max(primaryPort.maximumClearanceMm ?? 2, primaryPortToleranceMm),
         })) continue;
         const shaftAxis = normalize(subtract(shaft.end, shaft.start));
         if (Math.abs(dot(rotatedPortAxis, shaftAxis)) < minimumAxisDot) continue;
@@ -237,8 +340,8 @@ export function findBestSmartSnap({
         const matches: AssemblyConnection[] = [];
 
         for (const port of shaftPorts) {
-          const worldAxis = normalize(rotateVector(axisVectors[port.axis], rotation));
-          const worldPosition = add(solvedPosition, rotateVector(scale(port.position, localScale), rotation));
+          const worldAxis = normalize(rotateVector(scaleAxes(portLocalDirection(port), localScale), rotation));
+          const worldPosition = add(solvedPosition, rotateVector(scaleAxes(port.position, localScale), rotation));
           let closestMatch: { shaft: ShaftSegment; t: number; gap: number } | null = null;
           for (const candidateShaft of shafts) {
             if (requiredShaftIds.length > 0 && !requiredShaftIds.includes(candidateShaft.partId)) continue;
@@ -248,7 +351,7 @@ export function findBestSmartSnap({
               boreDiameterMm: port.diameter,
               shaftDiameterMm: candidateShaft.diameter,
               oversizeToleranceMm: portToleranceMm,
-              maximumClearanceMm: Math.max(2, portToleranceMm),
+              maximumClearanceMm: Math.max(port.maximumClearanceMm ?? 2, portToleranceMm),
             })) continue;
             const candidateAxis = normalize(subtract(candidateShaft.end, candidateShaft.start));
             if (Math.abs(dot(worldAxis, candidateAxis)) < minimumAxisDot) continue;

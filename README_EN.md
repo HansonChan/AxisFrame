@@ -6,15 +6,33 @@
 
 AxisFrame is a constraint-driven 3D design tool for DIY makers and lightweight structural projects. It brings real-scale linear shafts, connectors, bearings, and panels into a single browser-based workspace, helping people without traditional CAD experience build understandable, editable structures and turn them into practical procurement and assembly plans.
 
+## What's New (2026-08-07)
+
+- Fixed Option/Alt-drag duplication lag and corrected cross-clamp bore-size and mirrored-axis matching so the physical bore aligns with the shaft.
+
+## What's New (2026-08-06)
+
+- Added a 2-inch threaded-stem brake caster with a Ø50 mm × 17 mm wheel, 66 mm installed height, and an M8 × 20 mm top stem. Pair selection can smart-connect the stem to an axis-aligned Ø8 mm connector bore.
+- The development server is now available to devices on the same LAN while retaining the local `127.0.0.1:5173` entry point. Do not expose it directly to the public internet.
+
+## What's New (2026-07-28)
+
+- Added a parametric equal-bore swivel clamp in Ø8, Ø10, Ø12, and Ø15 stock variants. Its two clamp halves rotate independently and remain compatible with connections, project persistence, and GLB export.
+- Added a precise 360° rotation dial, near-45° snapping, and shaft-axis movement arrows at both shaft endpoints. Length handles now use a distinct color treatment so resizing and translation are easy to distinguish.
+- Added a 3:4 white-canvas component layout grouped automatically by BOM specification, material, and quantity, with adaptive preview fitting and PNG export.
+- Added semi-transparent model contours across the designer, component editor, and component previews for light and dark backgrounds. Contours are display-only and are excluded from exported manufacturing geometry.
+- Reference-image panels now adapt to each image's natural aspect ratio. A newly created project's first auto-save now creates a stable project record and avoids duplicate untitled names.
+- Removed the incorrect LM10 catalog entry and corrected surface and contour artifacts around the swivel clamp bores.
+
 ## Key Features
 
-- Design 3D structures made from linear shafts, connectors, bearings, and panels directly in the browser.
+- Design 3D structures made from linear shafts, connectors, bearings, and panels directly in the browser, with semi-transparent model contours that remain legible on light and dark backgrounds.
 - Start quickly with a built-in component library and structural templates.
-- Adjust dimensions, materials, hole positions, orientations, and stock variants with parametric controls.
-- Assemble parts with smart guides, connection ports, surface-contact constraints, and overall dimension controls.
-- Edit efficiently with undo and redo, copy, mirror, grouping, exploded views, reference images, and multiple camera views.
+- Adjust dimensions, materials, hole positions, orientations, stock variants, and independent swivel-clamp angles with parametric controls.
+- Assemble parts with smart guides, connection ports, threaded-stem/bore mating, surface-contact constraints, and overall dimension controls.
+- Edit efficiently with undo and redo, copy, mirror, grouping, exploded views, reference images, multiple camera views, precise rotation, and shaft-axis movement.
 - Check connection validity, structural support, and gravity-related risks while keeping the bill of materials in sync.
-- Export order workbooks and project JSON backups.
+- Export order workbooks, project JSON backups, and 3:4 white-canvas component layouts grouped by specification and quantity.
 - Save projects, reusable templates, and auto-save snapshots locally in the browser.
 - Use the interface in Chinese or English, with light and dark themes and responsive layouts.
 
@@ -44,7 +62,7 @@ Start the local development server:
 npm run dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173) in your browser.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173) locally. The development server also listens on the LAN, so devices on the same network can use the `Network` address shown in the startup log, for example `http://<local LAN IP>:5173`. Do not expose the development server directly to the public internet.
 
 ## Production Build
 

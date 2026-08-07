@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { stripModelContours } from "../../domain/graphics/modelContours";
 
 export type ComponentGlbExportDescriptor = {
   model: string;
@@ -9,6 +10,7 @@ export type ComponentGlbExportDescriptor = {
     id: string;
     position: [number, number, number];
     axis: "x" | "y" | "z";
+    direction?: [number, number, number];
     diameter: number;
     kind: string;
     behavior: string;
@@ -32,7 +34,7 @@ export function prepareComponentGlbScene(
   source: THREE.Object3D,
   descriptor: ComponentGlbExportDescriptor,
 ): THREE.Group {
-  const model = source.clone(true);
+  const model = stripModelContours(source.clone(true));
   model.updateMatrixWorld(true);
   const sourceBounds = new THREE.Box3().setFromObject(model);
   if (sourceBounds.isEmpty()) throw new Error("COMPONENT_EXPORT_EMPTY_GEOMETRY");
