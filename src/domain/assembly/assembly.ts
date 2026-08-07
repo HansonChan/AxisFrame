@@ -12,6 +12,7 @@ export type AssemblyPort = {
   kind?: PortKind;
   behavior?: PortBehavior;
   toleranceMm?: number;
+  maximumClearanceMm?: number;
   capacity?: number;
 };
 
@@ -105,7 +106,7 @@ type SnapInput = {
   ports: AssemblyPort[];
   shafts: ShaftSegment[];
   occupiedConnections?: AssemblyConnection[];
-  localScale?: number;
+  localScale?: number | Vec3;
   maxDistanceMm?: number;
   diameterToleranceMm?: number;
   axisToleranceDeg?: number;
@@ -122,6 +123,7 @@ const axisVectors: Record<AssemblyPort["axis"], Vec3> = {
 const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const subtract = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const scale = (v: Vec3, amount: number): Vec3 => [v[0] * amount, v[1] * amount, v[2] * amount];
+const scaleAxes = (v: Vec3, amount: number | Vec3): Vec3 => typeof amount === "number" ? scale(v, amount) : [v[0] * amount[0], v[1] * amount[1], v[2] * amount[2]];
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const length = (v: Vec3) => Math.sqrt(dot(v, v));
 const distance = (a: Vec3, b: Vec3) => length(subtract(a, b));
@@ -313,12 +315,12 @@ export function findBestSmartSnap({
 
   const proposedPortOrientations = new Map(shaftPorts.map((port) => [
     port.id,
-    classifySpatialOrientation(rotateVector(portLocalDirection(port), proposedRotation)),
+    classifySpatialOrientation(rotateVector(scaleAxes(portLocalDirection(port), localScale), proposedRotation)),
   ]));
   let best: (SmartSnapResult & { score: number; matchCount: number; directionMatchCount: number }) | null = null;
   for (const primaryPort of shaftPorts) {
-    const rotatedPortAxis = normalize(rotateVector(portLocalDirection(primaryPort), rotation));
-    const rotatedPortOffset = rotateVector(scale(primaryPort.position, localScale), rotation);
+    const rotatedPortAxis = normalize(rotateVector(scaleAxes(portLocalDirection(primaryPort), localScale), rotation));
+    const rotatedPortOffset = rotateVector(scaleAxes(primaryPort.position, localScale), rotation);
     const proposedPortPosition = add(proposedPosition, rotatedPortOffset);
     for (const shaft of shafts) {
         if (requiredShaftIds.length > 0 && !requiredShaftIds.includes(shaft.partId)) continue;
@@ -327,7 +329,7 @@ export function findBestSmartSnap({
           boreDiameterMm: primaryPort.diameter,
           shaftDiameterMm: shaft.diameter,
           oversizeToleranceMm: primaryPortToleranceMm,
-          maximumClearanceMm: Math.max(2, primaryPortToleranceMm),
+          maximumClearanceMm: Math.max(primaryPort.maximumClearanceMm ?? 2, primaryPortToleranceMm),
         })) continue;
         const shaftAxis = normalize(subtract(shaft.end, shaft.start));
         if (Math.abs(dot(rotatedPortAxis, shaftAxis)) < minimumAxisDot) continue;
@@ -338,8 +340,8 @@ export function findBestSmartSnap({
         const matches: AssemblyConnection[] = [];
 
         for (const port of shaftPorts) {
-          const worldAxis = normalize(rotateVector(portLocalDirection(port), rotation));
-          const worldPosition = add(solvedPosition, rotateVector(scale(port.position, localScale), rotation));
+          const worldAxis = normalize(rotateVector(scaleAxes(portLocalDirection(port), localScale), rotation));
+          const worldPosition = add(solvedPosition, rotateVector(scaleAxes(port.position, localScale), rotation));
           let closestMatch: { shaft: ShaftSegment; t: number; gap: number } | null = null;
           for (const candidateShaft of shafts) {
             if (requiredShaftIds.length > 0 && !requiredShaftIds.includes(candidateShaft.partId)) continue;
@@ -349,7 +351,7 @@ export function findBestSmartSnap({
               boreDiameterMm: port.diameter,
               shaftDiameterMm: candidateShaft.diameter,
               oversizeToleranceMm: portToleranceMm,
-              maximumClearanceMm: Math.max(2, portToleranceMm),
+              maximumClearanceMm: Math.max(port.maximumClearanceMm ?? 2, portToleranceMm),
             })) continue;
             const candidateAxis = normalize(subtract(candidateShaft.end, candidateShaft.start));
             if (Math.abs(dot(worldAxis, candidateAxis)) < minimumAxisDot) continue;

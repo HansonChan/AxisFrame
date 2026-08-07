@@ -268,7 +268,7 @@ type ComponentPort = AssemblyPort & {
   capacity: number;
 };
 type ComponentGeometry = { primitives: ComponentPrimitive[]; ports: ComponentPort[] };
-type RawComponentGeometry = { primitives: ComponentPrimitive[]; ports: Array<Pick<AssemblyPort, "id" | "axis" | "direction" | "position" | "diameter" | "kind" | "behavior" | "toleranceMm" | "capacity">> };
+type RawComponentGeometry = { primitives: ComponentPrimitive[]; ports: Array<Pick<AssemblyPort, "id" | "axis" | "direction" | "position" | "diameter" | "kind" | "behavior" | "toleranceMm" | "maximumClearanceMm" | "capacity">> };
 
 type PartTransform = ComponentTransform;
 type EditorSnapshot = {
@@ -376,6 +376,7 @@ type PartInfo = {
 
 type Vec3Tuple = [number, number, number];
 type TransformChangeHandler = (id: string, transform: PartTransform, connections?: AssemblyConnection[]) => void;
+type ModifierDuplicateTransformHandler = TransformChangeHandler;
 type GroupTransformChangeHandler = (transforms: Record<string, PartTransform>) => void;
 type ShaftLengthPreviewHandler = (id: string, transform: PartTransform) => void;
 type PanelEdgePreviewHandler = (id: string, transform: PartTransform) => void;
@@ -1973,7 +1974,7 @@ function proceduralComponentFit(part: LibraryPart, displayMode: ComponentDisplay
 function fittedComponentPorts(part: LibraryPart, displayMode: ComponentDisplayMode = "scene"): ComponentPort[] {
   const fit = proceduralComponentFit(part, displayMode);
   return part.geometry.ports.map((port) => ({
-    ...port,
+    ...port, maximumClearanceMm: port.maximumClearanceMm ?? ((part.equalBoreCrossClampDiameter !== undefined || part.model.startsWith("EQUAL-CROSS-")) && isShaftAssemblyPort(port) ? 0.25 : undefined),
     position: port.position.map((value, index) =>
       (value - fit.center.getComponent(index)) * fit.scale.getComponent(index),
     ) as Vec3Tuple,
@@ -4473,13 +4474,14 @@ function EditablePartGroup({
   modifierDuplicate: boolean;
   onSelect: (id: string, additive?: boolean) => void;
   onOpenContextMenu: PartContextMenuHandler;
-  onModifierDuplicate: (id: string) => void;
+  onModifierDuplicate: ModifierDuplicateTransformHandler;
   onTransformChange: TransformChangeHandler;
   onTransformPreview: (message: string | null) => void;
   children: React.ReactNode;
 }) {
   const referenceGuides = useContext(ReferenceGuideContext);
   const groupRef = useRef<THREE.Group>(null);
+  const modifierDuplicateDragRef = useRef(false);
   const [controlObject, setControlObject] = useState<THREE.Group | null>(null);
   const position = useMemo(
     () =>
@@ -4538,13 +4540,9 @@ function EditablePartGroup({
     if (surfaceContact) committedPosition.set(...surfaceContact.position);
     group.position.copy(committedPosition);
     const committedRotation = transformMode === "rotate"
-      ? [
-          radToDeg(group.rotation.x),
-          radToDeg(group.rotation.y),
-          radToDeg(group.rotation.z),
-        ] as Vec3Tuple
+      ? [radToDeg(group.rotation.x), radToDeg(group.rotation.y), radToDeg(group.rotation.z)] as Vec3Tuple
       : [transform.rotX, transform.rotY, transform.rotZ] as Vec3Tuple;
-    onTransformChange(id, {
+    const nextTransform = {
       ...transform,
       x: sceneDeltaToFreePositionMm(committedPosition.x - basePosition.x),
       y: sceneDeltaToFreePositionMm(committedPosition.y - basePosition.y),
@@ -4555,7 +4553,12 @@ function EditablePartGroup({
       scaleX: Math.sign(group.scale.x || 1) * Math.max(0.1, Math.round(Math.abs(group.scale.x) * 10) / 10),
       scaleY: Math.sign(group.scale.y || 1) * Math.max(0.1, Math.round(Math.abs(group.scale.y) * 10) / 10),
       scaleZ: Math.sign(group.scale.z || 1) * Math.max(0.1, Math.round(Math.abs(group.scale.z) * 10) / 10),
-    }, transformMode === "scale" ? [] : smartSnap?.connections ?? []);
+    };
+    const nextConnections = transformMode === "scale" ? [] : smartSnap?.connections ?? [];
+    const duplicateOnDrag = modifierDuplicateDragRef.current;
+    modifierDuplicateDragRef.current = false;
+    if (duplicateOnDrag) onModifierDuplicate(id, nextTransform, nextConnections);
+    else onTransformChange(id, nextTransform, nextConnections);
     referenceGuides?.report(id, null);
     onTransformPreview(null);
   };
@@ -4589,10 +4592,10 @@ function EditablePartGroup({
           onRotationPreview={onTransformPreview}
           onMouseDown={() => {
             const duplicateOnDrag = modifierDuplicate || document.documentElement.dataset.axisframeModifierDuplicate === "true";
-            if (duplicateOnDrag) onModifierDuplicate(id);
+            modifierDuplicateDragRef.current = duplicateOnDrag;
             if (transformMode === "translate") referenceGuides?.report(id, controlObject.position.toArray() as Vec3Tuple);
             onTransformPreview(duplicateOnDrag
-              ? "ALT/OPTION 拖拽复制：原位置已保留副本"
+              ? "ALT/OPTION 拖拽复制：松手后在原位置保留副本"
               : transformMode === "scale"
                 ? "缩放预览 / 10% 步进"
                 : transformMode === "rotate"
@@ -4908,7 +4911,7 @@ function ShaftRod({
   resolveSmartSnap?: (position: Vec3Tuple, rotation: Vec3Tuple) => SmartSnapResult | null;
   onSelect: (id: string, additive?: boolean) => void;
   onOpenContextMenu: PartContextMenuHandler;
-  onModifierDuplicate: (id: string) => void;
+  onModifierDuplicate: ModifierDuplicateTransformHandler;
   onTransformChange: (id: string, transform: PartTransform) => void;
   onShaftLengthEditStart: (id: string) => void;
   onShaftLengthPreview: ShaftLengthPreviewHandler;
@@ -5018,7 +5021,7 @@ function ConnectorNode({
   modifierDuplicate: boolean;
   onSelect: (id: string, additive?: boolean) => void;
   onOpenContextMenu: PartContextMenuHandler;
-  onModifierDuplicate: (id: string) => void;
+  onModifierDuplicate: ModifierDuplicateTransformHandler;
   onTransformChange: TransformChangeHandler;
   onTransformPreview: (message: string | null) => void;
 }) {
@@ -5461,7 +5464,7 @@ function ShelfPanel({
   modifierDuplicate: boolean;
   onSelect: (id: string, additive?: boolean) => void;
   onOpenContextMenu: PartContextMenuHandler;
-  onModifierDuplicate: (id: string) => void;
+  onModifierDuplicate: ModifierDuplicateTransformHandler;
   onTransformChange: (id: string, transform: PartTransform) => void;
   onPanelEdgeEditStart: (id: string) => void;
   onPanelEdgePreview: PanelEdgePreviewHandler;
@@ -5824,7 +5827,7 @@ function ThreeRackScene({
   onSelectMany: (ids: string[]) => void;
   onClearSelection: () => void;
   onOpenContextMenu: PartContextMenuHandler;
-  onModifierDuplicate: (id: string) => void;
+  onModifierDuplicate: ModifierDuplicateTransformHandler;
   onTransformChange: TransformChangeHandler;
   onGroupTransformChange: GroupTransformChangeHandler;
   onShaftLengthEditStart: (id: string) => void;
@@ -5879,7 +5882,7 @@ function ThreeRackScene({
       connectorId,
       proposedPosition: position,
       proposedRotation: rotation,
-      ports,
+      ports, localScale: ((transform) => [transform.scaleX, transform.scaleY, transform.scaleZ] as Vec3Tuple)(getPartTransform(transforms, connectorId)),
       shafts: shaftSegments,
       occupiedConnections: assemblyConnections,
       lockPortOrientation: lockAxialStop,
@@ -6457,7 +6460,7 @@ function CanvasPanel({
   onMirrorSelection: () => void;
   onFlipSelection: (direction: FlipDirection) => void;
   onRotateSelection: (axis: QuickRotateAxis, direction: QuickRotateDirection) => void;
-  onModifierDuplicate: (id: string) => void;
+  onModifierDuplicate: ModifierDuplicateTransformHandler;
   onCopySelection: () => void;
   onPasteClipboard: () => void;
   canPaste: boolean;
@@ -9366,14 +9369,7 @@ export function App() {
       ...current.filter((connection) => connection.connectorId !== id && connection.shaftId !== id),
       ...connections,
     ]);
-    setPreciseAssemblyRelations((current) => current.map((relation) =>
-      relation.fixedPartId === id || relation.movingPartId === id
-        ? {
-            ...relation,
-            status: "invalid" as const,
-            message: lang === "zh" ? "组件已手动变换，需要重新求解" : "PART WAS TRANSFORMED; RESOLVE REQUIRED",
-          }
-        : relation));
+    invalidatePreciseRelationsForParts([id], lang === "zh" ? "组件已手动变换，需要重新求解" : "PART WAS TRANSFORMED; RESOLVE REQUIRED");
   };
   const selectedPairKinds = selectedIds.map((id) => ({
     id,
@@ -9705,7 +9701,7 @@ export function App() {
       connectorId,
       proposedPosition: getPartWorldPosition(connectorId, dimensions, addedParts, transforms),
       proposedRotation: [connectorTransform.rotX, connectorTransform.rotY, connectorTransform.rotZ],
-      ports,
+      ports, localScale: [connectorTransform.scaleX, connectorTransform.scaleY, connectorTransform.scaleZ],
       shafts: [shaft],
       occupiedConnections: assemblyConnections.filter((connection) =>
         connection.connectorId !== connectorId && connection.shaftId !== shaftId,
@@ -9719,8 +9715,8 @@ export function App() {
     });
     if (!snap) {
       setAlignmentNotice(lang === "zh"
-        ? "智能连接失败：当前姿态下无可用连接孔，请先调整组件方向"
-        : "SMART CONNECT FAILED: NO COMPATIBLE PORT IN THE CURRENT POSE");
+        ? "智能连接失败：当前姿态下无规格兼容的连接孔，请检查孔轴尺寸与组件方向"
+        : "SMART CONNECT FAILED: CHECK SHAFT/BORE SIZE AND PORT DIRECTION");
       return;
     }
     recordHistory("align");
@@ -10211,7 +10207,7 @@ export function App() {
         connectorId: id,
         proposedPosition: getPartWorldPosition(id, dimensions, addedParts, nextTransforms),
         proposedRotation: [transform.rotX, transform.rotY, transform.rotZ],
-        ports,
+        ports, localScale: [transform.scaleX, transform.scaleY, transform.scaleZ],
         shafts: nextSegments,
         occupiedConnections: nextConnections,
         maxDistanceMm: 120,
@@ -10476,7 +10472,7 @@ export function App() {
     ));
   }, [activeUserGroupPartIds, addedParts, deletedIds, dimensions, recordHistory, selectedIds, transforms]);
 
-  const duplicateForModifierDrag = useCallback((sourceId: string) => {
+  const duplicateForModifierDrag = useCallback<ModifierDuplicateTransformHandler>((sourceId, nextTransform, connections = []) => {
     if (deletedIds.has(sourceId)) return;
     recordHistory("duplicate");
     const sourceAddedPart = addedParts.find((part) => part.id === sourceId);
@@ -10487,16 +10483,22 @@ export function App() {
     const sourceWorld = getPartWorldPosition(sourceId, dimensions, addedParts, transforms);
     const duplicateTransform = transformAtWorldPoint(id, sourceWorld, dimensions, nextAddedParts, getPartTransform(transforms, sourceId));
     setAddedParts(nextAddedParts);
-    setTransforms((current) => ({ ...current, [id]: duplicateTransform }));
+    setTransforms((current) => ({
+      ...current,
+      [sourceId]: constrainPartTransformToContactSurfaces({ id: sourceId, transform: nextTransform, dimensions, addedParts: nextAddedParts, transforms: current, deletedIds }),
+      [id]: duplicateTransform,
+    }));
     setMaterials((current) => ({ ...current, [id]: getPartMaterial(materials, sourceId) }));
-    if (panelCutouts[sourceId]?.length) {
-      setPanelCutouts((current) => ({
-        ...current,
-        [id]: panelCutouts[sourceId].map((cutout) => ({ ...cutout, id: `${id}-${cutout.id}` })),
-      }));
-    }
+    if (panelCutouts[sourceId]?.length) setPanelCutouts((current) => ({
+      ...current,
+      [id]: panelCutouts[sourceId].map((cutout) => ({ ...cutout, id: `${id}-${cutout.id}` })),
+    }));
+    setAssemblyConnections((current) => [
+      ...current.filter((connection) => connection.connectorId !== sourceId && connection.shaftId !== sourceId),
+      ...connections,
+    ]);
+    invalidatePreciseRelationsForParts([sourceId], lang === "zh" ? "组件已手动变换，需要重新求解" : "PART WAS TRANSFORMED; RESOLVE REQUIRED");
   }, [addedParts, availablePartIds, deletedIds, dimensions, lang, materials, panelCutouts, recordHistory, resolvedRiskIds, transforms]);
-
   const deleteParts = (ids: string[]) => {
     if (ids.length === 0) return;
     recordHistory("delete-part");

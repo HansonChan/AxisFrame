@@ -6,6 +6,10 @@
 
 AxisFrame is a constraint-driven 3D design tool for DIY makers and lightweight structural projects. It brings real-scale linear shafts, connectors, bearings, and panels into a single browser-based workspace, helping people without traditional CAD experience build understandable, editable structures and turn them into practical procurement and assembly plans.
 
+## What's New (2026-08-07)
+
+- Fixed Option/Alt-drag duplication lag and corrected cross-clamp bore-size and mirrored-axis matching so the physical bore aligns with the shaft.
+
 ## What's New (2026-08-06)
 
 - Added a 2-inch threaded-stem brake caster with a Ø50 mm × 17 mm wheel, 66 mm installed height, and an M8 × 20 mm top stem. Pair selection can smart-connect the stem to an axis-aligned Ø8 mm connector bore.

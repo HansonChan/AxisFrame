@@ -71,8 +71,8 @@ export function createEqualBoreCrossClampDefinition(diameter: number) {
     variant,
     primitives,
     ports: [
-      { id: "P1-Y", axis: "y" as const, position: [leftBoreX, 0, 0] as [number, number, number], diameter: variant.diameter },
-      { id: "P2-Z", axis: "z" as const, position: [rightBoreX, 0, 0] as [number, number, number], diameter: variant.diameter },
+      { id: "P1-Y", axis: "y" as const, position: [leftBoreX, 0, 0] as [number, number, number], diameter: variant.diameter, maximumClearanceMm: 0.25 },
+      { id: "P2-Z", axis: "z" as const, position: [rightBoreX, 0, 0] as [number, number, number], diameter: variant.diameter, maximumClearanceMm: 0.25 },
     ],
   };
 }
